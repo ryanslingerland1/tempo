@@ -10,32 +10,67 @@ reader = RSVPReader(words)
 
 root = tk.Tk()
 root.title("RSVP Reader")
-root.geometry("500x300")
+root.geometry("900x300")
 
 
-word_display = tk.Label(
-    root,
-    text="",
-    font=("Arial", 40)
-)
+# Five word display
+word_labels = []
 
-word_display.pack(expand=True)
+word_frame = tk.Frame(root)
+word_frame.pack(expand=True)
+
+
+for i in range(5):
+    label = tk.Label(
+        word_frame,
+        text="",
+        font=("Courier", 30),
+        width=12
+    )
+    label.pack(side="left")
+    word_labels.append(label)
 
 
 status = tk.Label(root, text="")
 status.pack()
 
 
+def update_display():
+
+    center = reader.position
+
+    for i, label in enumerate(word_labels):
+
+        index = center - 2 + i
+
+        if 0 <= index < len(reader.words):
+            label.config(
+                text=reader.words[index]
+            )
+        else:
+            label.config(
+                text=""
+            )
+
+        # Highlight center word
+        if i == 2:
+            label.config(
+                fg="red"
+            )
+        else:
+            label.config(
+                fg="black"
+            )
+
+
 def update():
 
     if reader.running:
 
-        word_display.config(
-            text=reader.current_word()
-        )
+        update_display()
 
         status.config(
-            text=f"WPM: {reader.wpm}"
+            text=f"WPM: {reader.wpm} | Word: {reader.position}/{len(reader.words)}"
         )
 
         reader.next_word()
