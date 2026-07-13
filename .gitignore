@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+
+venv/
+.env/
+.venv/
+
+.vscode/
+.idea/
+
+.DS_Store
+
+data/progress.json
+
+books/*.txt
