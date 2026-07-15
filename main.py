@@ -5,6 +5,7 @@ Right/D. Hold a key or the matching on-screen button for the hold actions.
 """
 
 import tkinter as tk
+from tkinter import font as tkfont
 from pathlib import Path
 
 from bookmanager import load_book, load_cards, load_progress, save_progress
@@ -228,14 +229,38 @@ class TempoApp:
         self.clear_content()
         center = self.reader.position
         row = tk.Frame(self.content)
-        row.pack(expand=True)
+        row.pack(expand=True, fill="both")
         theme = THEMES[self.theme_index]
+        self.root.update_idletasks()
+        row_width = max(row.winfo_width(), self.content.winfo_width(), 700)
+        margin = 24
+        gap = 36
+        focus_font = ("Courier", 26, "bold")
+        context_font = ("Courier", 26, "normal")
+        focus_word = self.reader.words[center]
+        focus_width = tkfont.Font(font=focus_font).measure(focus_word)
+
+        # RSVP works best with one focal word. Add immediate context only when
+        # it can sit beside the focal word without crowding or clipping.
+        display = [(0, focus_word, focus_font, row_width / 2)]
+        if 0 < center < len(self.reader.words) - 1:
+            left_word = self.reader.words[center - 1]
+            right_word = self.reader.words[center + 1]
+            context_measure = tkfont.Font(font=context_font)
+            left_width = context_measure.measure(left_word)
+            right_width = context_measure.measure(right_word)
+            left_x = row_width / 2 - focus_width / 2 - gap - left_width / 2
+            right_x = row_width / 2 + focus_width / 2 + gap + right_width / 2
+            if left_x - left_width / 2 >= margin and right_x + right_width / 2 <= row_width - margin:
+                display = [
+                    (-1, left_word, context_font, left_x),
+                    (0, focus_word, focus_font, row_width / 2),
+                    (1, right_word, context_font, right_x),
+                ]
         focus_label = None
-        for offset in range(-2, 3):
-            index = center + offset
-            word = self.reader.words[index] if 0 <= index < len(self.reader.words) else ""
-            label = tk.Label(row, text=word, font=("Courier", 26, "bold" if offset == 0 else "normal"), width=10)
-            label.pack(side="left")
+        for offset, word, font, x in display:
+            label = tk.Label(row, text=word, font=font)
+            label.place(x=x, rely=0.5, anchor="center")
             if offset == 0:
                 label.config(fg=theme["accent"])
                 focus_label = label
