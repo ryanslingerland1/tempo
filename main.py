@@ -222,7 +222,7 @@ class TempoApp:
         self.screen = "read"
         self.title_label.config(text=title)
         self.render_reading()
-        self.resume_reading()
+        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Center: start  •  Center hold: menu")
 
     def render_reading(self):
         self.clear_content()
