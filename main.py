@@ -22,6 +22,7 @@ THEMES = (
     {"name": "Sepia", "bg": "#eee0c0", "fg": "#4a3520", "accent": "#8b3f22"},
     {"name": "Focus", "bg": "#101010", "fg": "#f5f5f5", "accent": "#f2c94c", "single_word": True},
     {"name": "ORP", "bg": "#f7f7f7", "fg": "#202020", "accent": "#d62f2f", "single_word": True, "orp": True},
+    {"name": "ORP Night", "bg": "#000000", "fg": "#ffffff", "accent": "#ff4b4b", "single_word": True, "orp": True},
 )
 
 
