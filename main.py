@@ -14,7 +14,7 @@ from reader import RSVPReader
 
 ROOT = Path(__file__).parent
 HOLD_MS = 500
-REPEAT_MS = 175
+REPEAT_MS = 200
 
 THEMES = (
     {"name": "Classic", "bg": "#f7f4ed", "fg": "#202020", "accent": "#c02a2a"},
@@ -48,6 +48,7 @@ class TempoApp:
         self.repeat_jobs = {}
         self.read_job = None
         self.pending_center_tap = None
+        self.scrolling_preview = False
 
         self.title_label = tk.Label(root, font=("Helvetica", 16, "bold"))
         self.title_label.pack(pady=(20, 4))
@@ -101,6 +102,9 @@ class TempoApp:
             self.tap(button)
         if job := self.repeat_jobs.pop(button, None):
             self.root.after_cancel(job)
+        if button in ("left", "right") and self.scrolling_preview:
+            self.scrolling_preview = False
+            self.render_reading()
 
     def start_hold(self, button):
         self.hold_jobs.pop(button, None)
@@ -152,13 +156,17 @@ class TempoApp:
             self.root.destroy()
             return
         if self.screen == "read":
+            if self.reader.running:
+                return
             if button == "center" and not self.reader.running:
                 self.return_to_menu()
                 return
             if button == "left":
-                self.reader.move(-10)
+                self.reader.move(-1)
             elif button == "right":
-                self.reader.move(10)
+                self.reader.move(1)
+            if button in ("left", "right") and not self.reader.running:
+                self.scrolling_preview = True
             self.render_reading()
         elif self.screen == "cards" and button == "center":
             self.return_to_menu()
@@ -245,6 +253,34 @@ class TempoApp:
         context_font = ("Courier", 26, "normal")
         focus_word = self.reader.words[center]
         focus_width = tkfont.Font(font=focus_font).measure(focus_word)
+
+        if self.scrolling_preview:
+            preview_font = ("Courier", 22, "normal")
+            measure = tkfont.Font(font=preview_font)
+            available_width = row_width - 48
+            preview = [focus_word]
+            preview_start = center
+            for radius in range(4, 0, -1):
+                start = max(0, center - radius)
+                end = min(len(self.reader.words), center + radius + 1)
+                candidate = self.reader.words[start:end]
+                if measure.measure(" ".join(candidate)) <= available_width:
+                    preview = candidate
+                    preview_start = start
+                    break
+            x = (row_width - measure.measure(" ".join(preview))) / 2
+            highlight_label = None
+            space_width = measure.measure(" ")
+            for index, word in enumerate(preview):
+                label = tk.Label(row, text=word, font=preview_font)
+                label.place(x=x, rely=0.5, anchor="w")
+                if preview_start + index == center:
+                    highlight_label = label
+                x += measure.measure(word) + space_width
+            self.status.config(text=f"Seeking  •  {self.reader.position + 1}/{len(self.reader.words)}")
+            self.apply_theme()
+            highlight_label.config(fg=theme["accent"])
+            return
 
         # RSVP works best with one focal word. Add immediate context only when
         # it can sit beside the focal word without crowding or clipping.
