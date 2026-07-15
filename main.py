@@ -190,7 +190,7 @@ class TempoApp:
     def select_menu(self):
         name, path = self.menu_items[self.menu_index]
         if name == "← Back":
-            if path == ROOT / "books" or path == ROOT / "flashcards":
+            if self.menu_path in (ROOT / "books", ROOT / "flashcards"):
                 self.menu_path = None
                 self.menu_items = [("Books", ROOT / "books"), ("Flashcards", ROOT / "flashcards")]
             else:
