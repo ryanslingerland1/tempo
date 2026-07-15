@@ -17,18 +17,21 @@ root.geometry("900x300")
 word_labels = []
 
 word_frame = tk.Frame(root)
-word_frame.pack(expand=True)
-
+word_frame.pack(expand=True, fill="both")
 
 for i in range(5):
     label = tk.Label(
         word_frame,
         text="",
         font=("Courier", 30),
-        width=12
+        anchor="center",
+        padx=8,
     )
-    label.pack(side="left")
+    label.grid(row=0, column=i, sticky="ew")
     word_labels.append(label)
+
+for i in range(5):
+    word_frame.grid_columnconfigure(i, weight=1, uniform="word")
 
 
 status = tk.Label(root, text="")
