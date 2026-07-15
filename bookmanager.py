@@ -27,16 +27,16 @@ def load_cards(filename):
     return cards, data.get("title", Path(filename).stem.replace("_", " ").title())
 
 
-def save_progress(book, position, wpm):
+def save_progress(book, position, wpm, theme):
     DATA_DIR.mkdir(exist_ok=True)
     data = read_json(PROGRESS_FILE) if PROGRESS_FILE.exists() else {}
-    data[book] = {"position": position, "wpm": wpm}
+    data[book] = {"position": position, "wpm": wpm, "theme": theme}
     with open(PROGRESS_FILE, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=2)
 
 
 def load_progress(book):
     if not PROGRESS_FILE.exists():
-        return 0, 300
+        return 0, 300, None
     entry = read_json(PROGRESS_FILE).get(book, {})
-    return entry.get("position", 0), entry.get("wpm", 300)
+    return entry.get("position", 0), entry.get("wpm", 300), entry.get("theme")

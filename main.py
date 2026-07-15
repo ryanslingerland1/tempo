@@ -220,7 +220,10 @@ class TempoApp:
 
     def start_book(self, path):
         words, title = load_book(path)
-        position, wpm = load_progress(path.name)
+        position, wpm, saved_theme = load_progress(path.name)
+        self.theme_index = next(
+            (index for index, theme in enumerate(THEMES) if theme["name"] == saved_theme), 0
+        )
         self.reader = RSVPReader(words, wpm=wpm, position=position)
         self.book_path = path
         self.screen = "read"
@@ -349,7 +352,12 @@ class TempoApp:
             self.root.after_cancel(self.read_job)
             self.read_job = None
         if self.reader and self.book_path:
-            save_progress(self.book_path.name, self.reader.position, self.reader.wpm)
+            save_progress(
+                self.book_path.name,
+                self.reader.position,
+                self.reader.wpm,
+                THEMES[self.theme_index]["name"],
+            )
         if self.reader:
             self.reader.running = False
 
