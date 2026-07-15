@@ -21,6 +21,7 @@ THEMES = (
     {"name": "Night", "bg": "#1d2025", "fg": "#e8edf2", "accent": "#75c7ff"},
     {"name": "Sepia", "bg": "#eee0c0", "fg": "#4a3520", "accent": "#8b3f22"},
     {"name": "Focus", "bg": "#101010", "fg": "#f5f5f5", "accent": "#f2c94c", "single_word": True},
+    {"name": "ORP", "bg": "#f7f7f7", "fg": "#202020", "accent": "#d62f2f", "single_word": True, "orp": True},
 )
 
 
@@ -260,8 +261,22 @@ class TempoApp:
                 ]
         focus_label = None
         for offset, word, font, x in display:
-            label = tk.Label(row, text=word, font=font)
-            label.place(x=x, rely=0.5, anchor="center")
+            if offset == 0 and theme.get("orp"):
+                marker_index = self.orp_index(word)
+                before, marker, after = word[:marker_index], word[marker_index], word[marker_index + 1:]
+                font_measure = tkfont.Font(font=font)
+                marker_width = font_measure.measure(marker)
+                tk.Label(row, text=before, font=font).place(
+                    x=x - marker_width / 2, rely=0.5, anchor="e"
+                )
+                label = tk.Label(row, text=marker, font=font)
+                label.place(x=x, rely=0.5, anchor="center")
+                tk.Label(row, text=after, font=font).place(
+                    x=x + marker_width / 2, rely=0.5, anchor="w"
+                )
+            else:
+                label = tk.Label(row, text=word, font=font)
+                label.place(x=x, rely=0.5, anchor="center")
             if offset == 0:
                 label.config(fg=theme["accent"])
                 focus_label = label
@@ -269,6 +284,25 @@ class TempoApp:
         self.status.config(text=f"{state}  •  {self.reader.wpm} WPM  •  {self.reader.position + 1}/{len(self.reader.words)}")
         self.apply_theme()
         focus_label.config(fg=theme["accent"])
+
+    @staticmethod
+    def orp_index(word):
+        """Return the character index used as the word's recognition point."""
+        letters = [index for index, character in enumerate(word) if character.isalpha()]
+        if not letters:
+            return 0
+        letter_count = len(letters)
+        if letter_count == 1:
+            position = 0
+        elif letter_count <= 5:
+            position = 1
+        elif letter_count <= 9:
+            position = 2
+        elif letter_count <= 13:
+            position = 3
+        else:
+            position = 4
+        return letters[min(position, letter_count - 1)]
 
     def paused_center_tap(self):
         """A second center tap while paused changes the reading theme."""
