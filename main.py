@@ -125,9 +125,9 @@ class TempoApp:
                     self.pause_reading()
             else:
                 if button == "left":
-                    self.reader.move(-1)
+                    self.reader.decrease_speed()
                 elif button == "right":
-                    self.reader.move(1)
+                    self.reader.increase_speed()
                 else:
                     self.paused_center_tap()
                 self.render_reading()
@@ -253,10 +253,12 @@ class TempoApp:
             self.render_reading()
             self.status.config(text=f"Paused  •  Theme: {THEMES[self.theme_index]['name']}")
         else:
-            self.pending_center_tap = self.root.after(300, self.clear_pending_center_tap)
+            self.pending_center_tap = self.root.after(300, self.resume_from_paused)
 
-    def clear_pending_center_tap(self):
+    def resume_from_paused(self):
         self.pending_center_tap = None
+        if self.screen == "read" and not self.reader.running:
+            self.resume_reading()
 
     def resume_reading(self):
         self.reader.running = True
@@ -266,14 +268,20 @@ class TempoApp:
         self.reader.running = False
         self.stop_reading()
         self.render_reading()
-        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Left/Right: word  •  Center hold: menu")
+        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Left/Right: WPM  •  Center hold: menu")
 
     def read_tick(self):
         if not self.reader.running:
             return
         self.render_reading()
+        self.read_job = self.root.after(int(self.reader.delay() * 1000), self.advance_reading)
+
+    def advance_reading(self):
+        self.read_job = None
+        if not self.reader.running:
+            return
         self.reader.move(1)
-        self.read_job = self.root.after(int(self.reader.delay() * 1000), self.read_tick)
+        self.read_tick()
 
     def stop_reading(self):
         if self.read_job:
