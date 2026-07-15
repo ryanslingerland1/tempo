@@ -20,6 +20,7 @@ THEMES = (
     {"name": "Classic", "bg": "#f7f4ed", "fg": "#202020", "accent": "#c02a2a"},
     {"name": "Night", "bg": "#1d2025", "fg": "#e8edf2", "accent": "#75c7ff"},
     {"name": "Sepia", "bg": "#eee0c0", "fg": "#4a3520", "accent": "#8b3f22"},
+    {"name": "Focus", "bg": "#101010", "fg": "#f5f5f5", "accent": "#f2c94c", "single_word": True},
 )
 
 
@@ -243,7 +244,7 @@ class TempoApp:
         # RSVP works best with one focal word. Add immediate context only when
         # it can sit beside the focal word without crowding or clipping.
         display = [(0, focus_word, focus_font, row_width / 2)]
-        if 0 < center < len(self.reader.words) - 1:
+        if not theme.get("single_word") and 0 < center < len(self.reader.words) - 1:
             left_word = self.reader.words[center - 1]
             right_word = self.reader.words[center + 1]
             context_measure = tkfont.Font(font=context_font)
