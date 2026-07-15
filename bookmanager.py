@@ -1,45 +1,42 @@
 import json
-import os
+from pathlib import Path
+
+
+DATA_DIR = Path(__file__).parent / "data"
+PROGRESS_FILE = DATA_DIR / "progress.json"
+
+
+def read_json(filename):
+    with open(filename, encoding="utf-8") as file:
+        return json.load(file)
 
 
 def load_book(filename):
-    with open(filename, "r", encoding="utf-8") as file:
-        text = file.read()
+    with open(filename, encoding="utf-8") as file:
+        words = file.read().split()
+    if not words:
+        raise ValueError(f"{filename} has no book text.")
+    return words, Path(filename).stem.replace("_", " ").title()
 
-    words = text.split()
 
-    return words
+def load_cards(filename):
+    data = read_json(filename)
+    cards = data.get("cards", [])
+    if not all(isinstance(card, dict) and {"front", "back"} <= card.keys() for card in cards):
+        raise ValueError(f"{filename} cards must each contain 'front' and 'back'.")
+    return cards, data.get("title", Path(filename).stem.replace("_", " ").title())
 
 
 def save_progress(book, position, wpm):
-
-    data = {}
-
-    if os.path.exists("data/progress.json"):
-        with open("data/progress.json") as f:
-            data = json.load(f)
-
-    data[book] = {
-        "position": position,
-        "wpm": wpm
-    }
-
-    with open("data/progress.json", "w") as f:
-        json.dump(data, f, indent=4)
+    DATA_DIR.mkdir(exist_ok=True)
+    data = read_json(PROGRESS_FILE) if PROGRESS_FILE.exists() else {}
+    data[book] = {"position": position, "wpm": wpm}
+    with open(PROGRESS_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
 
 
 def load_progress(book):
-
-    if not os.path.exists("data/progress.json"):
+    if not PROGRESS_FILE.exists():
         return 0, 300
-
-    with open("data/progress.json") as f:
-        data = json.load(f)
-
-    if book in data:
-        return (
-            data[book]["position"],
-            data[book]["wpm"]
-        )
-
-    return 0, 300
+    entry = read_json(PROGRESS_FILE).get(book, {})
+    return entry.get("position", 0), entry.get("wpm", 300)

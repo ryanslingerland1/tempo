@@ -1,25 +1,17 @@
-import time
-
-
 class RSVPReader:
-    def __init__(self, words, wpm=300):
+    def __init__(self, words, wpm=300, position=0):
+        if not words:
+            raise ValueError("A book needs at least one word.")
         self.words = words
-        self.position = 0
-        self.wpm = wpm
+        self.position = max(0, min(position, len(words) - 1))
+        self.wpm = max(25, wpm)
         self.running = False
 
     def current_word(self):
-        if self.position < len(self.words):
-            return self.words[self.position]
-        return None
+        return self.words[self.position]
 
-    def next_word(self):
-        if self.position < len(self.words)-1:
-            self.position += 1
-
-    def previous_word(self):
-        if self.position > 0:
-            self.position -= 1
+    def move(self, amount):
+        self.position = max(0, min(self.position + amount, len(self.words) - 1))
 
     def delay(self):
         return 60 / self.wpm
