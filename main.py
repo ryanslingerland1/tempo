@@ -15,9 +15,6 @@ from reader import RSVPReader
 ROOT = Path(__file__).parent
 HOLD_MS = 500
 REPEAT_MS = 200
-SEEK_INITIAL_REPEAT_MS = 350
-SEEK_MIN_REPEAT_MS = 150
-SEEK_ACCELERATION_MS = 10
 
 THEMES = (
     {"name": "Classic", "bg": "#f7f4ed", "fg": "#202020", "accent": "#c02a2a"},
@@ -33,9 +30,14 @@ class TempoApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Tempo RSVP Reader")
-        self.root.geometry("900x360")
-        self.root.minsize(700, 300)
+        self.root.geometry("428x142")
+        self.root.minsize(428, 142)
 
+        self.did_hold = {
+            "left": False,
+            "center": False,
+            "right": False,
+        }
         self.theme_index = 0
         self.screen = "menu"
         self.menu_items = []
@@ -49,7 +51,6 @@ class TempoApp:
         self.held = {"left": False, "center": False, "right": False}
         self.hold_jobs = {}
         self.repeat_jobs = {}
-        self.seek_repeat_count = {"left": 0, "right": 0}
         self.read_job = None
         self.pending_center_tap = None
         self.scrolling_preview = False
@@ -64,12 +65,12 @@ class TempoApp:
         controls = tk.Frame(root)
         controls.pack(pady=(0, 20))
         self.buttons = {}
-        for name, text in (("left", "LEFT"), ("center", "CENTER"), ("right", "RIGHT")):
-            button = tk.Button(controls, text=text, width=16, height=2)
-            button.pack(side="left", padx=8)
-            button.bind("<ButtonPress-1>", lambda event, key=name: self.press(key))
-            button.bind("<ButtonRelease-1>", lambda event, key=name: self.release(key))
-            self.buttons[name] = button
+        # for name, text in (("left", "LEFT"), ("center", "CENTER"), ("right", "RIGHT")):
+        #     button = tk.Button(controls, text=text, width=16, height=2)
+        #     button.pack(side="left", padx=8)
+        #     button.bind("<ButtonPress-1>", lambda event, key=name: self.press(key))
+        #     button.bind("<ButtonRelease-1>", lambda event, key=name: self.release(key))
+        #     self.buttons[name] = button
 
         self.bind_keys()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -94,29 +95,39 @@ class TempoApp:
     def press(self, button):
         if self.held[button]:
             return
+
         self.held[button] = True
-        if button in self.seek_repeat_count:
-            self.seek_repeat_count[button] = 0
         self.hold_jobs[button] = self.root.after(HOLD_MS, lambda: self.start_hold(button))
 
+        self.hold_jobs[button] = self.root.after(
+            HOLD_MS,
+            lambda: self.start_hold(button)
+        )
     def release(self, button):
         if not self.held[button]:
             return
         self.held[button] = False
-        if job := self.hold_jobs.pop(button, None):
+        job = self.hold_jobs.pop(button, None)
+
+        if job:
             self.root.after_cancel(job)
+
+        # Only perform a tap if a hold never happened
+        if not self.did_hold[button]:
             self.tap(button)
+
+        self.did_hold[button] = False
         if job := self.repeat_jobs.pop(button, None):
             self.root.after_cancel(job)
-        if button in self.seek_repeat_count:
-            self.seek_repeat_count[button] = 0
         if button in ("left", "right") and self.scrolling_preview:
             self.scrolling_preview = False
             self.render_reading()
 
     def start_hold(self, button):
         self.hold_jobs.pop(button, None)
+
         if self.held[button]:
+            self.did_hold[button] = True
             self.hold(button)
 
     def repeat(self, button):
@@ -180,14 +191,7 @@ class TempoApp:
             self.return_to_menu()
             return
         if self.held[button]:
-            interval = REPEAT_MS
-            if self.screen == "read" and not self.reader.running and button in self.seek_repeat_count:
-                interval = max(
-                    SEEK_MIN_REPEAT_MS,
-                    SEEK_INITIAL_REPEAT_MS - self.seek_repeat_count[button] * SEEK_ACCELERATION_MS,
-                )
-                self.seek_repeat_count[button] += 1
-            self.repeat_jobs[button] = self.root.after(interval, lambda: self.repeat(button))
+            self.repeat_jobs[button] = self.root.after(REPEAT_MS, lambda: self.repeat(button))
 
     def clear_content(self):
         for widget in self.content.winfo_children():
@@ -252,9 +256,7 @@ class TempoApp:
         self.screen = "read"
         self.title_label.config(text=title)
         self.render_reading()
-        self.status.config(
-            text=f"Paused  •  {self.reader.wpm} WPM  •  {self.remaining_time_text()}  •  Center: start"
-        )
+        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Center: start  •  Center hold: menu")
 
     def render_reading(self):
         self.clear_content()
@@ -294,9 +296,7 @@ class TempoApp:
                 if preview_start + index == center:
                     highlight_label = label
                 x += measure.measure(word) + space_width
-            self.status.config(
-                text=f"Seeking  •  {self.reader.position + 1}/{len(self.reader.words)}  •  {self.remaining_time_text()}"
-            )
+            self.status.config(text=f"Seeking  •  {self.reader.position + 1}/{len(self.reader.words)}")
             self.apply_theme()
             highlight_label.config(fg=theme["accent"])
             return
@@ -340,23 +340,9 @@ class TempoApp:
                 label.config(fg=theme["accent"])
                 focus_label = label
         state = "Reading" if self.reader.running else "Paused"
-        self.status.config(
-            text=f"{state}  •  {self.reader.wpm} WPM  •  {self.reader.position + 1}/{len(self.reader.words)}  •  {self.remaining_time_text()}"
-        )
+        self.status.config(text=f"{state}  •  {self.reader.wpm} WPM  •  {self.reader.position + 1}/{len(self.reader.words)}")
         self.apply_theme()
         focus_label.config(fg=theme["accent"])
-
-    def remaining_time_text(self):
-        """Return a compact estimate based on the remaining words and current WPM."""
-        words_remaining = len(self.reader.words) - self.reader.position
-        seconds = (words_remaining * 60 + self.reader.wpm - 1) // self.reader.wpm
-        if seconds < 60:
-            return "<1 min left"
-        minutes, seconds = divmod(seconds, 60)
-        if minutes < 60:
-            return f"{minutes}m {seconds:02d}s left"
-        hours, minutes = divmod(minutes, 60)
-        return f"{hours}h {minutes:02d}m left"
 
     @staticmethod
     def orp_index(word):
@@ -401,9 +387,7 @@ class TempoApp:
         self.reader.running = False
         self.stop_reading()
         self.render_reading()
-        self.status.config(
-            text=f"Paused  •  {self.reader.wpm} WPM  •  {self.remaining_time_text()}  •  Left/Right: WPM"
-        )
+        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Left/Right: WPM  •  Center hold: menu")
 
     def read_tick(self):
         if not self.reader.running:

@@ -2,6 +2,12 @@
 
 Tempo is a Mac prototype for a three-button RSVP (Rapid Serial Visual Presentation) reader that will later run on a Raspberry Pi Pico.
 
+Run it with `python3 main.py`.
+
+## Pico screen preview
+
+The main menu includes **Pico Preview: On/Off**. Enabling it locks the desktop window to a compact 320×240 layout and scales the reader, menus, flashcards, controls, and status text for a small Pico display. The preview resolution is set by `PICO_SCREEN_SIZE` in `main.py`, so it can be changed when the final display is selected.
+
 ## Run
 
 The on-screen buttons can be used with the mouse. Keyboard equivalents are:
