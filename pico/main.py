@@ -61,14 +61,12 @@ class TempoApp:
         self.scrolling_preview = False
 
         self.title_label = tk.Label(root, font=("Helvetica", 16, "bold"))
-        self.title_label.pack(pady=(20, 4))
         self.content = tk.Frame(root)
-        self.content.pack(expand=True, fill="both", padx=30)
         self.status = tk.Label(root, font=("Helvetica", 12))
-        self.status.pack(pady=6)
+        self.controls = tk.Frame(root)
+        self.set_chrome_visible(title=True, status=True)
 
-        controls = tk.Frame(root)
-        controls.pack(pady=(0, 20))
+        controls = self.controls
         self.buttons = {}
         # for name, text in (("left", "LEFT"), ("center", "CENTER"), ("right", "RIGHT")):
         #     button = tk.Button(controls, text=text, width=16, height=2)
@@ -80,6 +78,20 @@ class TempoApp:
         self.bind_keys()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self.show_menu()
+
+    def set_chrome_visible(self, title, status):
+        # pack_forget() followed by a later pack() re-adds a widget at the
+        # END of the packing order rather than its old spot, which silently
+        # breaks the top-to-bottom layout. Always unpack everything and
+        # rebuild the order from scratch so it's never order-dependent.
+        for widget in (self.title_label, self.content, self.status, self.controls):
+            widget.pack_forget()
+        if title:
+            self.title_label.pack(pady=(20, 4))
+        self.content.pack(expand=True, fill="both", padx=30)
+        if status:
+            self.status.pack(pady=6)
+        self.controls.pack(pady=(0, 20))
 
     def bind_keys(self):
         bindings = {"left": ("<Left>", "<a>", "<A>"), "center": ("<space>", "<Return>", "<s>", "<S>"), "right": ("<Right>", "<d>", "<D>")}
@@ -153,9 +165,9 @@ class TempoApp:
     def tap(self, button):
         if self.screen == "menu":
             if button == "left":
-                self.move_menu(1)
-            elif button == "right":
                 self.move_menu(-1)
+            elif button == "right":
+                self.move_menu(1)
             else:
                 self.select_menu()
         elif self.screen == "read":
@@ -230,12 +242,29 @@ class TempoApp:
 
     def render_menu(self):
         self.clear_content()
-        self.title_label.pack(pady=(20, 4))
-        self.title_label.config(text="Tempo" if self.menu_path is None else f"Tempo / {self.menu_path.name}")
-        for index, (name, _) in enumerate(self.menu_items):
+        self.set_chrome_visible(title=False, status=False)
+
+        menu_font = ("Helvetica", 18)
+        row_pady = 2
+        self.root.update_idletasks()
+        available_height = self.content.winfo_height()
+        if available_height <= 1:
+            available_height = 110
+        row_height = tkfont.Font(font=menu_font).metrics("linespace") + 2 * row_pady
+        visible_count = max(1, available_height // row_height)
+
+        total = len(self.menu_items)
+        if total <= visible_count:
+            start = 0
+        else:
+            start = min(max(0, self.menu_index - visible_count // 2), total - visible_count)
+        visible_items = self.menu_items[start:start + visible_count]
+
+        for offset, (name, _) in enumerate(visible_items):
+            index = start + offset
             prefix = "› " if index == self.menu_index else "  "
-            tk.Label(self.content, text=prefix + name, anchor="w", font=("Helvetica", 22)).pack(fill="x", pady=6)
-        self.status.config(text="Left: down   Center: select (hold: quit)   Right: up")
+            tk.Label(self.content, text=prefix + name, anchor="w", font=menu_font).pack(fill="x", pady=row_pady)
+
         self.apply_theme()
 
     def move_menu(self, amount):
@@ -278,7 +307,7 @@ class TempoApp:
         self.reader = RSVPReader(words, wpm=wpm, position=position, paragraph_ends=paragraph_ends)
         self.book_path = path
         self.screen = "read"
-        self.title_label.pack_forget()
+        self.set_chrome_visible(title=False, status=True)
         self.render_reading()
         self.status.config(
             text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  Center: start  •  Center hold: menu"
@@ -473,6 +502,7 @@ class TempoApp:
         self.card_index = 0
         self.card_flipped = False
         self.screen = "cards"
+        self.set_chrome_visible(title=True, status=True)
         self.title_label.config(text=title)
         self.render_card()
 

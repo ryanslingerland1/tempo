@@ -16,10 +16,10 @@ The on-screen buttons can be used with the mouse. Keyboard equivalents are:
 
 | Button | Action |
 | --- | --- |
-| Left tap | Move down the menu |
+| Left tap | Move up the menu |
 | Center tap | Open the selected folder, book, or flashcard deck |
 | Center hold | Quit the app |
-| Right tap | Move up the menu |
+| Right tap | Move down the menu |
 
 ### Reader — running
 
