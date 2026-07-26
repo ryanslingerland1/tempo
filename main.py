@@ -255,12 +255,12 @@ class TempoApp:
         self.render_menu()
 
     def start_book(self, path):
-        words, title = load_book(path)
+        words, title, paragraph_ends = load_book(path)
         position, wpm, saved_theme = load_progress(path.name)
         self.theme_index = next(
             (index for index, theme in enumerate(THEMES) if theme["name"] == saved_theme), 0
         )
-        self.reader = RSVPReader(words, wpm=wpm, position=position)
+        self.reader = RSVPReader(words, wpm=wpm, position=position, paragraph_ends=paragraph_ends)
         self.book_path = path
         self.screen = "read"
         self.title_label.pack_forget()

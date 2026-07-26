@@ -13,10 +13,18 @@ def read_json(filename):
 
 def load_book(filename):
     with open(filename, encoding="utf-8") as file:
-        words = file.read().split()
+        text = file.read()
+    words = []
+    paragraph_ends = set()
+    for paragraph in text.split("\n\n"):
+        paragraph_words = paragraph.split()
+        if not paragraph_words:
+            continue
+        words.extend(paragraph_words)
+        paragraph_ends.add(len(words) - 1)
     if not words:
         raise ValueError(f"{filename} has no book text.")
-    return words, Path(filename).stem.replace("_", " ").title()
+    return words, Path(filename).stem.replace("_", " ").title(), paragraph_ends
 
 
 def load_cards(filename):
