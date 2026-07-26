@@ -207,6 +207,7 @@ class TempoApp:
 
     def render_menu(self):
         self.clear_content()
+        self.title_label.pack(pady=(20, 4))
         self.title_label.config(text="Tempo" if self.menu_path is None else f"Tempo / {self.menu_path.name}")
         for index, (name, _) in enumerate(self.menu_items):
             prefix = "› " if index == self.menu_index else "  "
@@ -254,7 +255,7 @@ class TempoApp:
         self.reader = RSVPReader(words, wpm=wpm, position=position)
         self.book_path = path
         self.screen = "read"
-        self.title_label.config(text=title)
+        self.title_label.pack_forget()
         self.render_reading()
         self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Center: start  •  Center hold: menu")
 
