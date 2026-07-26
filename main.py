@@ -265,7 +265,11 @@ class TempoApp:
         row.pack(expand=True, fill="both")
         theme = THEMES[self.theme_index]
         self.root.update_idletasks()
-        row_width = max(row.winfo_width(), self.content.winfo_width(), 700)
+        row_width = row.winfo_width()
+        if row_width <= 1:
+            row_width = self.content.winfo_width()
+        if row_width <= 1:
+            row_width = 700
         margin = 24
         gap = 36
         focus_font = ("Courier", 26, "bold")
