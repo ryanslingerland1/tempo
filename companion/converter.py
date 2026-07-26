@@ -14,8 +14,12 @@ from ebooklib import epub
 BLOCK_TAGS = ("p", "h1", "h2", "h3", "h4", "h5", "h6", "li", "blockquote")
 
 
+def _read_epub(path):
+    return epub.read_epub(str(path), options={"ignore_ncx": True})
+
+
 def epub_to_text(path):
-    book = epub.read_epub(str(path), options={"ignore_ncx": True})
+    book = _read_epub(path)
     paragraphs = []
     for idref, linear in book.spine:
         if linear == "no":
@@ -33,9 +37,31 @@ def epub_to_text(path):
     return "\n\n".join(paragraphs)
 
 
+def epub_title(path):
+    titles = _read_epub(path).get_metadata("DC", "title")
+    return titles[0][0] if titles else None
+
+
 CONVERTERS = {
     ".epub": epub_to_text,
 }
+
+TITLE_READERS = {
+    ".epub": epub_title,
+}
+
+
+def suggest_title(path):
+    path = Path(path)
+    reader = TITLE_READERS.get(path.suffix.lower())
+    if reader:
+        try:
+            title = reader(path)
+            if title:
+                return title
+        except Exception:
+            pass
+    return path.stem.replace("_", " ").replace("-", " ").title()
 
 
 def convert(input_path, output_path):
@@ -48,6 +74,7 @@ def convert(input_path, output_path):
         )
     text = converter(input_path)
     Path(output_path).write_text(text, encoding="utf-8")
+    return text
 
 
 def main():

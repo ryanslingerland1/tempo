@@ -1,0 +1,146 @@
+* {
+    color: #e8e9ee;
+    font-size: 13px;
+}
+
+QWidget#root {
+    background-color: #121319;
+}
+
+QLabel#appTitle {
+    font-size: 21px;
+    font-weight: 600;
+    color: #f4f4f8;
+}
+
+QLabel#appSubtitle {
+    color: #8b8d9c;
+    font-size: 12.5px;
+}
+
+QLabel#sectionLabel {
+    color: #8b8d9c;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+}
+
+QFrame#dropZone {
+    background-color: #191b22;
+    border: 2px dashed #33354a;
+    border-radius: 14px;
+}
+
+QFrame#dropZone[dragging="true"] {
+    background-color: #1d2036;
+    border: 2px dashed #7c5cff;
+}
+
+QFrame#dropZone[hasFile="true"] {
+    border: 2px solid #29d3c1;
+    background-color: #16232a;
+}
+
+QLabel#dropIcon {
+    font-size: 30px;
+}
+
+QLabel#dropTitle {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: #f4f4f8;
+}
+
+QLabel#dropSubtitle {
+    color: #6d6f80;
+    font-size: 12px;
+}
+
+QLineEdit {
+    background-color: #191b22;
+    border: 1px solid #2c2e3d;
+    border-radius: 9px;
+    padding: 9px 12px;
+    color: #f4f4f8;
+    selection-background-color: #7c5cff;
+}
+
+QLineEdit:focus {
+    border: 1px solid #7c5cff;
+}
+
+QPushButton#primaryButton {
+    background-color: #7c5cff;
+    color: #ffffff;
+    border: none;
+    border-radius: 10px;
+    padding: 11px 18px;
+    font-weight: 600;
+}
+
+QPushButton#primaryButton:hover {
+    background-color: #8f72ff;
+}
+
+QPushButton#primaryButton:pressed {
+    background-color: #6a4ce0;
+}
+
+QPushButton#primaryButton:disabled {
+    background-color: #2c2e3d;
+    color: #64667a;
+}
+
+QLabel#statusLabel {
+    font-size: 12.5px;
+}
+
+QLabel#statusLabel[state="success"] {
+    color: #29d3c1;
+}
+
+QLabel#statusLabel[state="error"] {
+    color: #ff6b81;
+}
+
+QLabel#statusLabel[state="idle"] {
+    color: #6d6f80;
+}
+
+QListWidget#bookList {
+    background-color: #191b22;
+    border: 1px solid #24263355;
+    border-radius: 12px;
+    padding: 6px;
+    outline: none;
+}
+
+QListWidget#bookList::item {
+    padding: 9px 10px;
+    border-radius: 8px;
+    margin: 2px 0px;
+}
+
+QListWidget#bookList::item:selected {
+    background-color: #23263a;
+}
+
+QListWidget#bookList::item:hover {
+    background-color: #1d1f2c;
+}
+
+QScrollBar:vertical {
+    background: transparent;
+    width: 8px;
+}
+
+QScrollBar::handle:vertical {
+    background: #33354a;
+    border-radius: 4px;
+    min-height: 24px;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
