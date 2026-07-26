@@ -70,6 +70,25 @@ QLineEdit:focus {
     border: 1px solid #7c5cff;
 }
 
+QCheckBox {
+    color: #b6b8c6;
+    font-size: 12.5px;
+    spacing: 8px;
+}
+
+QCheckBox::indicator {
+    width: 16px;
+    height: 16px;
+    border-radius: 5px;
+    border: 1px solid #33354a;
+    background-color: #191b22;
+}
+
+QCheckBox::indicator:checked {
+    background-color: #7c5cff;
+    border: 1px solid #7c5cff;
+}
+
 QPushButton#primaryButton {
     background-color: #7c5cff;
     color: #ffffff;

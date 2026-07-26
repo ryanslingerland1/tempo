@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
@@ -146,6 +147,10 @@ class MainWindow(QWidget):
         self.title_input.setPlaceholderText("Book title")
         root_layout.addWidget(self.title_input)
 
+        self.skip_front_matter_checkbox = QCheckBox("Skip to Chapter 1 (leave out title page, TOC, foreword, etc.)")
+        self.skip_front_matter_checkbox.setChecked(True)
+        root_layout.addWidget(self.skip_front_matter_checkbox)
+
         self.convert_button = QPushButton("Convert && Add to Pico")
         self.convert_button.setObjectName("primaryButton")
         self.convert_button.setEnabled(False)
@@ -209,7 +214,11 @@ class MainWindow(QWidget):
 
         try:
             PICO_BOOKS_DIR.mkdir(parents=True, exist_ok=True)
-            text = convert(self.source_path, destination)
+            text = convert(
+                self.source_path,
+                destination,
+                skip_front_matter=self.skip_front_matter_checkbox.isChecked(),
+            )
         except Exception as error:
             self._set_status(f"Failed: {error}", "error")
             return
