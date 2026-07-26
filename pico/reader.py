@@ -29,13 +29,16 @@ class RSVPReader:
     def pause_multiplier(self):
         if self.position in self.paragraph_ends:
             return PARAGRAPH_PAUSE
-        stripped = self.current_word().rstrip("\"')]")
+        # Strip closing wrappers (straight AND curly/smart quotes, since
+        # converted ebooks use "..."/'...' almost exclusively) so the real
+        # sentence-ending punctuation underneath is what gets checked.
+        stripped = self.current_word().rstrip("\"'’”)]")
         if stripped:
             if stripped[-1] in ".!?":
                 return SENTENCE_PAUSE
             if stripped[-1] in ",;:":
                 return CLAUSE_PAUSE
-        bare = self.current_word().strip(string.punctuation)
+        bare = self.current_word().strip(string.punctuation + "‘’“”")
         if len(bare) >= LONG_WORD_LENGTH:
             return LONG_WORD_PAUSE
         return 1.0
