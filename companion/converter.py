@@ -28,6 +28,17 @@ CHAPTER_KEYWORD_RE = re.compile(r"^(chapter|part|book)\b", re.IGNORECASE)
 PROLOGUE_RE = re.compile(r"^prologue\b", re.IGNORECASE)
 LEADING_CAPS_RE = re.compile(r"^([A-Z][A-Z']*(?:\s+[A-Z][A-Z']*)+)\b")
 TITLE_LINE_MAX_LENGTH = 60
+ELLIPSIS_RE = re.compile(r"\s*\.(?:\s*\.)+")
+
+
+def _normalize_ellipsis(text):
+    """Collapse a spaced-out ellipsis ("word . . .") into a single glyph
+    attached to the word before it ("word…"), matching how every other bit
+    of trailing punctuation attaches with no space. Left as three separate
+    lone-period "words", each one flashes on its own in the RSVP reader —
+    and each still reads as a full sentence end, tripling the pause.
+    """
+    return ELLIPSIS_RE.sub("…", text)
 
 
 def _fix_leading_caps(text):
@@ -93,7 +104,7 @@ def _epub_sections(book):
             # No separator: adjacent inline tags (e.g. a styled drop-cap span
             # right before the rest of the word) usually have no real space
             # between them in the source, so inserting one would be wrong.
-            text = " ".join(tag.get_text().split())
+            text = _normalize_ellipsis(" ".join(tag.get_text().split()))
             if not text:
                 continue
             if heading is None and tag.name in HEADING_TAGS:

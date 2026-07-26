@@ -5,6 +5,7 @@ CLAUSE_PAUSE = 2.0
 PARAGRAPH_PAUSE = 3.75
 LONG_WORD_PAUSE = 1.7
 LONG_WORD_LENGTH = 9
+ELLIPSIS_PAUSE = 4.5
 
 
 class RSVPReader:
@@ -34,6 +35,8 @@ class RSVPReader:
         # sentence-ending punctuation underneath is what gets checked.
         stripped = self.current_word().rstrip("\"'’”)]")
         if stripped:
+            if stripped[-1] == "…":
+                return ELLIPSIS_PAUSE
             if stripped[-1] in ".!?":
                 return SENTENCE_PAUSE
             if stripped[-1] in ",;:":
