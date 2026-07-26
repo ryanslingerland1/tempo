@@ -11,6 +11,13 @@ venv/
 
 .DS_Store
 
-data/progress.json
+pico/data/progress.json
 
-books/*.txt
+pico/books/*.txt
+
+# Source ebooks/test input are personal library files, never commit them
+companion/samples/
+*.epub
+*.pdf
+*.mobi
+*.azw3
