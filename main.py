@@ -15,6 +15,9 @@ from reader import RSVPReader
 ROOT = Path(__file__).parent
 HOLD_MS = 500
 REPEAT_MS = 200
+SEEK_INITIAL_REPEAT_MS = 350
+SEEK_MIN_REPEAT_MS = 80
+SEEK_ACCELERATION_MS = 15
 
 THEMES = (
     {"name": "Classic", "bg": "#f7f4ed", "fg": "#202020", "accent": "#c02a2a"},
@@ -52,6 +55,7 @@ class TempoApp:
         self.hold_jobs = {}
         self.repeat_jobs = {}
         self.pending_release_jobs = {}
+        self.seek_repeat_count = {"left": 0, "right": 0}
         self.read_job = None
         self.pending_center_tap = None
         self.scrolling_preview = False
@@ -109,6 +113,8 @@ class TempoApp:
             return
 
         self.held[button] = True
+        if button in self.seek_repeat_count:
+            self.seek_repeat_count[button] = 0
         self.hold_jobs[button] = self.root.after(HOLD_MS, lambda: self.start_hold(button))
 
     def release(self, button):
@@ -127,6 +133,8 @@ class TempoApp:
         self.did_hold[button] = False
         if job := self.repeat_jobs.pop(button, None):
             self.root.after_cancel(job)
+        if button in self.seek_repeat_count:
+            self.seek_repeat_count[button] = 0
         if button in ("left", "right") and self.scrolling_preview:
             self.scrolling_preview = False
             self.render_reading()
@@ -199,7 +207,14 @@ class TempoApp:
             self.return_to_menu()
             return
         if self.held[button]:
-            self.repeat_jobs[button] = self.root.after(REPEAT_MS, lambda: self.repeat(button))
+            interval = REPEAT_MS
+            if self.screen == "read" and not self.reader.running and button in self.seek_repeat_count:
+                interval = max(
+                    SEEK_MIN_REPEAT_MS,
+                    SEEK_INITIAL_REPEAT_MS - self.seek_repeat_count[button] * SEEK_ACCELERATION_MS,
+                )
+                self.seek_repeat_count[button] += 1
+            self.repeat_jobs[button] = self.root.after(interval, lambda: self.repeat(button))
 
     def clear_content(self):
         for widget in self.content.winfo_children():
