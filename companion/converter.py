@@ -26,6 +26,20 @@ ROMAN_NUMERAL_RE = re.compile(
 )
 CHAPTER_KEYWORD_RE = re.compile(r"^(chapter|part|book)\b", re.IGNORECASE)
 PROLOGUE_RE = re.compile(r"^prologue\b", re.IGNORECASE)
+LEADING_CAPS_RE = re.compile(r"^([A-Z][A-Z']*(?:\s+[A-Z][A-Z']*)+)\b")
+TITLE_LINE_MAX_LENGTH = 60
+
+
+def _fix_leading_caps(text):
+    """Undo the drop-cap/small-caps effect many novels use to open a chapter
+    (e.g. a styled "S" followed by "HE RAN" in small caps). As plain text
+    this reads as a jarring all-caps run, so bring it down to sentence case.
+    """
+    match = LEADING_CAPS_RE.match(text)
+    if not match:
+        return text
+    run = match.group(1)
+    return run[0] + run[1:].lower() + text[len(run):]
 
 
 def _is_bare_chapter_marker(text):
@@ -74,12 +88,22 @@ def _epub_sections(book):
         soup = BeautifulSoup(item.get_content(), "xml")
         paragraphs = []
         heading = None
+        fixed_opening = False
         for tag in soup.find_all(BLOCK_TAGS):
-            text = " ".join(tag.get_text(" ", strip=True).split())
+            # No separator: adjacent inline tags (e.g. a styled drop-cap span
+            # right before the rest of the word) usually have no real space
+            # between them in the source, so inserting one would be wrong.
+            text = " ".join(tag.get_text().split())
             if not text:
                 continue
             if heading is None and tag.name in HEADING_TAGS:
                 heading = text
+            # Chapter numbers/subtitles are short lines; the drop-cap effect
+            # only ever lands on the chapter's first real (long) paragraph,
+            # so only look for it there — never on short title-like lines.
+            if not fixed_opening and len(text) > TITLE_LINE_MAX_LENGTH:
+                text = _fix_leading_caps(text)
+                fixed_opening = True
             paragraphs.append(text)
         if heading is None and paragraphs and len(paragraphs[0]) <= 50:
             heading = paragraphs[0]
