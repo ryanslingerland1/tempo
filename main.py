@@ -51,6 +51,7 @@ class TempoApp:
         self.held = {"left": False, "center": False, "right": False}
         self.hold_jobs = {}
         self.repeat_jobs = {}
+        self.pending_release_jobs = {}
         self.read_job = None
         self.pending_center_tap = None
         self.scrolling_preview = False
@@ -84,13 +85,24 @@ class TempoApp:
                 self.root.bind(key.replace("<", "<KeyRelease-"), lambda event, name=name: self.key_release(name))
 
     def key_press(self, button):
+        # The OS auto-repeats a held key as rapid fake release/press pairs.
+        # If a release is still pending when the next press arrives, it's
+        # just repeat noise for the same hold, not a real release.
+        pending = self.pending_release_jobs.pop(button, None)
+        if pending:
+            self.root.after_cancel(pending)
+            return "break"
         if not self.held[button]:
             self.press(button)
         return "break"
 
     def key_release(self, button):
-        self.release(button)
+        self.pending_release_jobs[button] = self.root.after(20, lambda: self.finish_release(button))
         return "break"
+
+    def finish_release(self, button):
+        self.pending_release_jobs.pop(button, None)
+        self.release(button)
 
     def press(self, button):
         if self.held[button]:
@@ -99,10 +111,6 @@ class TempoApp:
         self.held[button] = True
         self.hold_jobs[button] = self.root.after(HOLD_MS, lambda: self.start_hold(button))
 
-        self.hold_jobs[button] = self.root.after(
-            HOLD_MS,
-            lambda: self.start_hold(button)
-        )
     def release(self, button):
         if not self.held[button]:
             return
@@ -181,9 +189,9 @@ class TempoApp:
                 self.return_to_menu()
                 return
             if button == "left":
-                self.reader.move(-1)
+                self.reader.move(-10)
             elif button == "right":
-                self.reader.move(1)
+                self.reader.move(10)
             if button in ("left", "right") and not self.reader.running:
                 self.scrolling_preview = True
             self.render_reading()
