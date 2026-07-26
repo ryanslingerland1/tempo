@@ -265,7 +265,9 @@ class TempoApp:
         self.screen = "read"
         self.title_label.pack_forget()
         self.render_reading()
-        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Center: start  •  Center hold: menu")
+        self.status.config(
+            text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  Center: start  •  Center hold: menu"
+        )
 
     def render_reading(self):
         self.clear_content()
@@ -353,9 +355,22 @@ class TempoApp:
                 label.config(fg=theme["accent"])
                 focus_label = label
         state = "Reading" if self.reader.running else "Paused"
-        self.status.config(text=f"{state}  •  {self.reader.wpm} WPM  •  {self.reader.position + 1}/{len(self.reader.words)}")
+        self.status.config(
+            text=f"{state}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  {self.reader.position + 1}/{len(self.reader.words)}"
+        )
         self.apply_theme()
         focus_label.config(fg=theme["accent"])
+
+    def remaining_time_text(self):
+        words_remaining = len(self.reader.words) - self.reader.position
+        seconds = (words_remaining * 60 + self.reader.wpm - 1) // self.reader.wpm
+        if seconds < 60:
+            return "<1 min left"
+        minutes, seconds = divmod(seconds, 60)
+        if minutes < 60:
+            return f"{minutes}m left"
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}h {minutes:02d}m left"
 
     @staticmethod
     def orp_index(word):
@@ -400,7 +415,9 @@ class TempoApp:
         self.reader.running = False
         self.stop_reading()
         self.render_reading()
-        self.status.config(text=f"Paused  •  {self.reader.wpm} WPM  •  Left/Right: WPM  •  Center hold: menu")
+        self.status.config(
+            text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+        )
 
     def read_tick(self):
         if not self.reader.running:
