@@ -297,9 +297,9 @@ class TempoApp:
         if row_width <= 1:
             row_width = 700
         margin = 24
-        gap = 36
+        gap = 20
         focus_font = ("Courier", 26, "bold")
-        context_font = ("Courier", 26, "normal")
+        context_font = ("Courier", 16, "normal")
         focus_word = self.reader.words[center]
         focus_width = tkfont.Font(font=focus_font).measure(focus_word)
 
