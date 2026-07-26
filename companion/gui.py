@@ -151,6 +151,10 @@ class MainWindow(QWidget):
         self.skip_front_matter_checkbox.setChecked(True)
         root_layout.addWidget(self.skip_front_matter_checkbox)
 
+        self.name_pacing_checkbox = QCheckBox("Pause longer the first time a name appears")
+        self.name_pacing_checkbox.setChecked(True)
+        root_layout.addWidget(self.name_pacing_checkbox)
+
         self.convert_button = QPushButton("Convert && Add to Pico")
         self.convert_button.setObjectName("primaryButton")
         self.convert_button.setEnabled(False)
@@ -218,6 +222,7 @@ class MainWindow(QWidget):
                 self.source_path,
                 destination,
                 skip_front_matter=self.skip_front_matter_checkbox.isChecked(),
+                mark_name_introductions=self.name_pacing_checkbox.isChecked(),
             )
         except Exception as error:
             self._set_status(f"Failed: {error}", "error")

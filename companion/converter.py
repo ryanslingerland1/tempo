@@ -28,7 +28,34 @@ CHAPTER_KEYWORD_RE = re.compile(r"^(chapter|part|book)\b", re.IGNORECASE)
 PROLOGUE_RE = re.compile(r"^prologue\b", re.IGNORECASE)
 LEADING_CAPS_RE = re.compile(r"^([A-Z][A-Z']*(?:\s+[A-Z][A-Z']*)+)\b")
 TITLE_LINE_MAX_LENGTH = 60
+
+# Common short words that should drop back to lowercase when de-capitalizing
+# a styled run (e.g. "RAN" in "SHE RAN"). Anything NOT in this list is left
+# capitalized, since it's more likely a proper noun (e.g. "BLY" in
+# "HAROLD BLY") than a word this list simply doesn't cover.
+COMMON_LOWERCASE_WORDS = {
+    "a", "an", "the", "and", "but", "or", "nor", "for", "so", "yet",
+    "in", "on", "at", "to", "from", "of", "by", "with", "as", "into",
+    "onto", "out", "up", "down", "over", "under", "off", "about",
+    "she", "he", "it", "they", "we", "i", "you", "her", "him", "them",
+    "his", "its", "their", "our", "your", "my",
+    "is", "was", "are", "were", "be", "been", "being",
+    "has", "had", "have", "do", "did", "does",
+    "can", "could", "will", "would", "shall", "should", "may", "might", "must",
+    "not", "no", "if", "then", "than", "that", "this", "these", "those",
+    "there", "here", "who", "what", "when", "where", "why", "how",
+    "ran", "walked", "said", "went", "came", "saw", "cried", "screamed",
+    "turned", "looked", "stood", "sat", "felt", "knew", "thought",
+}
 ELLIPSIS_RE = re.compile(r"\s*\.(?:\s*\.)+")
+
+# Zero-width space: an invisible pacing hint dropped right after a proper
+# name's first appearance in the book. reader.py (pico side) looks for this
+# character to give first mentions of a name a beat longer than repeat
+# mentions, without ever having to re-scan the book itself. Must match the
+# NAME_INTRO_MARKER constant in pico/reader.py.
+NAME_INTRO_MARKER = "​"
+NAME_RUN_RE = re.compile(r"\b[A-Z][a-z'\-]*(?:\s+[A-Z][a-z'\-]*)+\b")
 
 
 def _normalize_ellipsis(text):
@@ -42,15 +69,24 @@ def _normalize_ellipsis(text):
 
 
 def _fix_leading_caps(text):
-    """Undo the drop-cap/small-caps effect many novels use to open a chapter
-    (e.g. a styled "S" followed by "HE RAN" in small caps). As plain text
-    this reads as a jarring all-caps run, so bring it down to sentence case.
+    """Undo the drop-cap/small-caps effect many novels use to open a scene
+    (e.g. a styled "S" followed by "HE RAN", or a whole name like
+    "HAROLD BLY"). Each word in the run is judged on its own: common short
+    words drop to lowercase ("RAN" -> "ran"), but anything not in that list
+    is treated as a likely proper noun and keeps its capital ("BLY").
     """
     match = LEADING_CAPS_RE.match(text)
     if not match:
         return text
     run = match.group(1)
-    return run[0] + run[1:].lower() + text[len(run):]
+    words = run.split()
+    fixed_words = [words[0][0] + words[0][1:].lower()]
+    for word in words[1:]:
+        if word.lower() in COMMON_LOWERCASE_WORDS:
+            fixed_words.append(word.lower())
+        else:
+            fixed_words.append(word[0] + word[1:].lower())
+    return " ".join(fixed_words) + text[len(run):]
 
 
 def _is_bare_chapter_marker(text):
@@ -67,6 +103,23 @@ def _is_bare_chapter_marker(text):
     if core and ROMAN_NUMERAL_RE.match(core):
         return True
     return False
+
+
+def _mark_name_introductions(paragraphs):
+    """Tag the first appearance of each multi-word capitalized name (e.g.
+    "Harold Bly") with an invisible marker, so the reader can give a new
+    name a beat longer than it gives every later, already-familiar mention.
+    """
+    seen = set()
+
+    def tag_first_mention(match):
+        name = match.group().lower()
+        if name in seen:
+            return match.group()
+        seen.add(name)
+        return match.group() + NAME_INTRO_MARKER
+
+    return [NAME_RUN_RE.sub(tag_first_mention, paragraph) for paragraph in paragraphs]
 
 
 def _looks_like_chapter_start(heading):
@@ -99,7 +152,6 @@ def _epub_sections(book):
         soup = BeautifulSoup(item.get_content(), "xml")
         paragraphs = []
         heading = None
-        fixed_opening = False
         for tag in soup.find_all(BLOCK_TAGS):
             # No separator: adjacent inline tags (e.g. a styled drop-cap span
             # right before the rest of the word) usually have no real space
@@ -109,19 +161,19 @@ def _epub_sections(book):
                 continue
             if heading is None and tag.name in HEADING_TAGS:
                 heading = text
-            # Chapter numbers/subtitles are short lines; the drop-cap effect
-            # only ever lands on the chapter's first real (long) paragraph,
-            # so only look for it there — never on short title-like lines.
-            if not fixed_opening and len(text) > TITLE_LINE_MAX_LENGTH:
+            # Chapter numbers/subtitles are short lines; the drop-cap/small-caps
+            # effect is applied at the start of every scene (not just the very
+            # first paragraph of a chapter file), but always on a real, long
+            # prose paragraph — so use length, not position, to find them.
+            if len(text) > TITLE_LINE_MAX_LENGTH:
                 text = _fix_leading_caps(text)
-                fixed_opening = True
             paragraphs.append(text)
         if heading is None and paragraphs and len(paragraphs[0]) <= 50:
             heading = paragraphs[0]
         yield heading, paragraphs
 
 
-def epub_to_text(path, skip_front_matter=True):
+def epub_to_text(path, skip_front_matter=True, mark_name_introductions=True):
     book = _read_epub(path)
     sections = list(_epub_sections(book))
 
@@ -137,6 +189,8 @@ def epub_to_text(path, skip_front_matter=True):
     paragraphs = [paragraph for _heading, paras in sections[start:] for paragraph in paras]
     if not paragraphs:
         raise ValueError(f"No readable text found in {path}")
+    if mark_name_introductions:
+        paragraphs = _mark_name_introductions(paragraphs)
     return "\n\n".join(paragraphs)
 
 
@@ -167,7 +221,7 @@ def suggest_title(path):
     return path.stem.replace("_", " ").replace("-", " ").title()
 
 
-def convert(input_path, output_path, skip_front_matter=True):
+def convert(input_path, output_path, skip_front_matter=True, mark_name_introductions=True):
     input_path = Path(input_path)
     converter = CONVERTERS.get(input_path.suffix.lower())
     if converter is None:
@@ -175,7 +229,11 @@ def convert(input_path, output_path, skip_front_matter=True):
         raise NotImplementedError(
             f"No converter yet for '{input_path.suffix}' files (supported: {supported})"
         )
-    text = converter(input_path, skip_front_matter=skip_front_matter)
+    text = converter(
+        input_path,
+        skip_front_matter=skip_front_matter,
+        mark_name_introductions=mark_name_introductions,
+    )
     Path(output_path).write_text(text, encoding="utf-8")
     return text
 
@@ -191,9 +249,20 @@ def main():
         help="Keep the title page, copyright, TOC, foreword, etc. instead of "
         "jumping straight to the first chapter (default: skip them)",
     )
-    parser.set_defaults(skip_front_matter=True)
+    parser.add_argument(
+        "--no-name-pacing",
+        dest="mark_name_introductions",
+        action="store_false",
+        help="Don't give a name's first appearance a longer pause (default: do)",
+    )
+    parser.set_defaults(skip_front_matter=True, mark_name_introductions=True)
     args = parser.parse_args()
-    convert(args.input, args.output, skip_front_matter=args.skip_front_matter)
+    convert(
+        args.input,
+        args.output,
+        skip_front_matter=args.skip_front_matter,
+        mark_name_introductions=args.mark_name_introductions,
+    )
 
 
 if __name__ == "__main__":

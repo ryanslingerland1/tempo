@@ -6,6 +6,12 @@ PARAGRAPH_PAUSE = 3.75
 LONG_WORD_PAUSE = 1.7
 LONG_WORD_LENGTH = 9
 ELLIPSIS_PAUSE = 4.5
+NAME_INTRO_PAUSE = 2.2
+
+# Zero-width space: an invisible pacing hint the converter (companion side)
+# drops right after a name's first appearance in the book. Must match the
+# NAME_INTRO_MARKER constant in companion/converter.py.
+NAME_INTRO_MARKER = "​"
 
 
 class RSVPReader:
@@ -28,23 +34,29 @@ class RSVPReader:
         return 60 / self.wpm * self.pause_multiplier()
 
     def pause_multiplier(self):
+        word = self.current_word()
+
         if self.position in self.paragraph_ends:
-            return PARAGRAPH_PAUSE
-        # Strip closing wrappers (straight AND curly/smart quotes, since
-        # converted ebooks use "..."/'...' almost exclusively) so the real
-        # sentence-ending punctuation underneath is what gets checked.
-        stripped = self.current_word().rstrip("\"'’”)]")
-        if stripped:
-            if stripped[-1] == "…":
-                return ELLIPSIS_PAUSE
-            if stripped[-1] in ".!?":
-                return SENTENCE_PAUSE
-            if stripped[-1] in ",;:":
-                return CLAUSE_PAUSE
-        bare = self.current_word().strip(string.punctuation + "‘’“”")
-        if len(bare) >= LONG_WORD_LENGTH:
-            return LONG_WORD_PAUSE
-        return 1.0
+            base = PARAGRAPH_PAUSE
+        else:
+            # Strip closing wrappers (straight AND curly/smart quotes, since
+            # converted ebooks use "..."/'...' almost exclusively, plus the
+            # invisible name marker) so the real punctuation underneath is
+            # what gets checked.
+            stripped = word.rstrip("\"'’”)]" + NAME_INTRO_MARKER)
+            if stripped and stripped[-1] == "…":
+                base = ELLIPSIS_PAUSE
+            elif stripped and stripped[-1] in ".!?":
+                base = SENTENCE_PAUSE
+            elif stripped and stripped[-1] in ",;:":
+                base = CLAUSE_PAUSE
+            else:
+                bare = word.strip(string.punctuation + "‘’“”" + NAME_INTRO_MARKER)
+                base = LONG_WORD_PAUSE if len(bare) >= LONG_WORD_LENGTH else 1.0
+
+        if NAME_INTRO_MARKER in word:
+            return max(base, NAME_INTRO_PAUSE)
+        return base
 
     def increase_speed(self):
         self.wpm += 25
