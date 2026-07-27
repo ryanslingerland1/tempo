@@ -74,6 +74,12 @@ SETTING_SPECS = (
         "options": ("Courier", "Helvetica", "Georgia", "Menlo"),
         "format": lambda value: value,
     },
+    {
+        "key": "progress_display",
+        "label": "Progress shown as",
+        "options": ("words", "percent"),
+        "format": lambda value: "Words" if value == "words" else "Percent",
+    },
 )
 
 
@@ -545,7 +551,7 @@ class TempoApp:
         self.render_reading()
         self.status.config(
             text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
-            f"  •  {self.reader.position + 1}/{len(self.reader.words)}  •  Center: start"
+            f"  •  {self.progress_text()}  •  Center: start"
         )
         self.schedule_sleep_timer()
 
@@ -622,7 +628,7 @@ class TempoApp:
                 if is_focus:
                     highlight_label = label
                 x += measure.measure(word) + space_width
-            self.status.config(text=f"Seeking  •  {self.reader.position + 1}/{len(self.reader.words)}")
+            self.status.config(text=f"Seeking  •  {self.progress_text()}")
             self.apply_theme()
             highlight_label.config(fg=theme["accent"])
             return
@@ -667,10 +673,17 @@ class TempoApp:
                 focus_label = label
         state = "Reading" if self.reader.running else "Paused"
         self.status.config(
-            text=f"{state}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  {self.reader.position + 1}/{len(self.reader.words)}"
+            text=f"{state}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  {self.progress_text()}"
         )
         self.apply_theme()
         focus_label.config(fg=theme["accent"])
+
+    def progress_text(self):
+        total = len(self.reader.words)
+        position = self.reader.position + 1
+        if self.settings.get("progress_display", "words") == "percent":
+            return f"{position * 100 // total}%"
+        return f"{position}/{total}"
 
     def remaining_time_text(self):
         words_remaining = len(self.reader.words) - self.reader.position
@@ -728,7 +741,7 @@ class TempoApp:
         self.render_reading()
         self.status.config(
             text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
-            f"  •  {self.reader.position + 1}/{len(self.reader.words)}"
+            f"  •  {self.progress_text()}"
         )
 
     def read_tick(self):
