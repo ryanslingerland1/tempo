@@ -5,6 +5,11 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent / "data"
 PROGRESS_FILE = DATA_DIR / "progress.json"
 
+# Zero-width non-joiner: an invisible marker the converter (companion side)
+# drops on a chapter heading's first word. Must match CHAPTER_MARKER in
+# companion/converter.py.
+CHAPTER_MARKER = "‌"
+
 
 def read_json(filename):
     with open(filename, encoding="utf-8") as file:
@@ -16,15 +21,19 @@ def load_book(filename):
         text = file.read()
     words = []
     paragraph_ends = set()
+    chapters = []
     for paragraph in text.split("\n\n"):
         paragraph_words = paragraph.split()
         if not paragraph_words:
             continue
+        if paragraph_words[0].startswith(CHAPTER_MARKER):
+            paragraph_words[0] = paragraph_words[0][len(CHAPTER_MARKER):]
+            chapters.append((len(words), " ".join(paragraph_words)))
         words.extend(paragraph_words)
         paragraph_ends.add(len(words) - 1)
     if not words:
         raise ValueError(f"{filename} has no book text.")
-    return words, Path(filename).stem.replace("_", " ").title(), paragraph_ends
+    return words, Path(filename).stem.replace("_", " ").title(), paragraph_ends, chapters
 
 
 def load_cards(filename):

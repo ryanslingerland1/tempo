@@ -57,6 +57,12 @@ ELLIPSIS_RE = re.compile(r"\s*\.(?:\s*\.)+")
 NAME_INTRO_MARKER = "​"
 NAME_RUN_RE = re.compile(r"\b[A-Z][a-z'\-]*(?:\s+[A-Z][a-z'\-]*)+\b")
 
+# Zero-width non-joiner: an invisible marker on the first word of a detected
+# chapter heading (e.g. "Chapter One"), so the Pico can build a "jump to
+# chapter" list straight from the plain text file without re-detecting
+# chapters itself. Must match CHAPTER_MARKER in pico/bookmanager.py.
+CHAPTER_MARKER = "‌"
+
 
 def _normalize_ellipsis(text):
     """Collapse a spaced-out ellipsis ("word . . .") into a single glyph
@@ -152,6 +158,7 @@ def _epub_sections(book):
         soup = BeautifulSoup(item.get_content(), "xml")
         paragraphs = []
         heading = None
+        heading_index = None
         for tag in soup.find_all(BLOCK_TAGS):
             # No separator: adjacent inline tags (e.g. a styled drop-cap span
             # right before the rest of the word) usually have no real space
@@ -161,6 +168,7 @@ def _epub_sections(book):
                 continue
             if heading is None and tag.name in HEADING_TAGS:
                 heading = text
+                heading_index = len(paragraphs)
             # Chapter numbers/subtitles are short lines; the drop-cap/small-caps
             # effect is applied at the start of every scene (not just the very
             # first paragraph of a chapter file), but always on a real, long
@@ -170,6 +178,9 @@ def _epub_sections(book):
             paragraphs.append(text)
         if heading is None and paragraphs and len(paragraphs[0]) <= 50:
             heading = paragraphs[0]
+            heading_index = 0
+        if heading_index is not None and _looks_like_chapter_start(heading):
+            paragraphs[heading_index] = CHAPTER_MARKER + paragraphs[heading_index]
         yield heading, paragraphs
 
 

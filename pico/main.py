@@ -48,6 +48,10 @@ class TempoApp:
         self.menu_path = None
         self.reader = None
         self.book_path = None
+        self.chapters = []
+        self.chapter_book_path = None
+        self.chapter_items = []
+        self.chapter_index = 0
         self.cards = []
         self.card_index = 0
         self.card_flipped = False
@@ -168,8 +172,17 @@ class TempoApp:
                 self.move_menu(-1)
             elif button == "right":
                 self.move_menu(1)
+            elif self.selected_menu_book_path():
+                self.menu_center_tap()
             else:
                 self.select_menu()
+        elif self.screen == "chapters":
+            if button == "left":
+                self.move_chapters(-1)
+            elif button == "right":
+                self.move_chapters(1)
+            else:
+                self.select_chapter()
         elif self.screen == "read":
             if self.reader.running:
                 if button == "left":
@@ -201,6 +214,10 @@ class TempoApp:
             self.pending_center_tap = None
         if self.screen == "menu" and button == "center":
             self.root.destroy()
+            return
+        if self.screen == "chapters" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
             return
         if self.screen == "read":
             if self.reader.running:
@@ -240,10 +257,15 @@ class TempoApp:
         self.menu_index = 0
         self.render_menu()
 
-    def render_menu(self):
-        self.clear_content()
-        self.set_chrome_visible(title=False, status=False)
-
+    def render_scrolling_list(self, count, selected_index, label_for):
+        """Render a vertically-centered, auto-scrolling window of labels —
+        shared by the book/flashcard menu and the chapter-jump list, since
+        both need the same "show what fits, scroll to keep selection
+        visible" behavior on this tiny, fixed-size screen. Returns the
+        Label for the selected row so the caller can highlight it — that
+        has to happen after apply_theme(), which would otherwise overwrite
+        any color set here.
+        """
         menu_font = ("Helvetica", 18)
         row_pady = 2
         self.root.update_idletasks()
@@ -253,19 +275,30 @@ class TempoApp:
         row_height = tkfont.Font(font=menu_font).metrics("linespace") + 2 * row_pady
         visible_count = max(1, available_height // row_height)
 
-        total = len(self.menu_items)
-        if total <= visible_count:
+        if count <= visible_count:
             start = 0
         else:
-            start = min(max(0, self.menu_index - visible_count // 2), total - visible_count)
-        visible_items = self.menu_items[start:start + visible_count]
+            start = min(max(0, selected_index - visible_count // 2), count - visible_count)
 
-        for offset, (name, _) in enumerate(visible_items):
+        selected_label = None
+        for offset in range(min(visible_count, count - start)):
             index = start + offset
-            prefix = "› " if index == self.menu_index else "  "
-            tk.Label(self.content, text=prefix + name, anchor="w", font=menu_font).pack(fill="x", pady=row_pady)
+            prefix = "› " if index == selected_index else "  "
+            label = tk.Label(self.content, text=prefix + label_for(index), anchor="w", font=menu_font)
+            label.pack(fill="x", pady=row_pady)
+            if index == selected_index:
+                selected_label = label
+        return selected_label
 
+    def render_menu(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        selected = self.render_scrolling_list(
+            len(self.menu_items), self.menu_index, lambda i: self.menu_items[i][0]
+        )
         self.apply_theme()
+        if selected:
+            selected.config(fg="red")
 
     def move_menu(self, amount):
         self.menu_index = (self.menu_index + amount) % len(self.menu_items)
@@ -288,6 +321,68 @@ class TempoApp:
         else:
             self.start_cards(path)
 
+    def selected_menu_book_path(self):
+        """The path of the currently highlighted menu row, if (and only if)
+        it's an actual book file — not a folder, "Back", or flashcard deck.
+        """
+        if not self.menu_items:
+            return None
+        name, path = self.menu_items[self.menu_index]
+        if name == "← Back" or path.is_dir():
+            return None
+        if (ROOT / "books") in path.parents:
+            return path
+        return None
+
+    def menu_center_tap(self):
+        """A second center tap on a book opens its chapter list instead of
+        starting it, mirroring the existing double-tap-for-theme gesture."""
+        if self.pending_center_tap:
+            self.root.after_cancel(self.pending_center_tap)
+            self.pending_center_tap = None
+            path = self.selected_menu_book_path()
+            if path:
+                self.show_chapters(path)
+            return
+        self.pending_center_tap = self.root.after(300, self.menu_single_tap)
+
+    def menu_single_tap(self):
+        self.pending_center_tap = None
+        if self.screen == "menu":
+            self.select_menu()
+
+    def show_chapters(self, path):
+        _words, _title, _paragraph_ends, chapters = load_book(path)
+        if not chapters:
+            return
+        self.chapter_book_path = path
+        self.chapter_items = [(None, "← Back")] + chapters
+        self.chapter_index = 0
+        self.screen = "chapters"
+        self.render_chapters()
+
+    def render_chapters(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        selected = self.render_scrolling_list(
+            len(self.chapter_items), self.chapter_index, lambda i: self.chapter_items[i][1]
+        )
+        self.apply_theme()
+        if selected:
+            selected.config(fg="red")
+
+    def move_chapters(self, amount):
+        self.chapter_index = (self.chapter_index + amount) % len(self.chapter_items)
+        self.render_chapters()
+
+    def select_chapter(self):
+        word_index, _title = self.chapter_items[self.chapter_index]
+        if word_index is None:
+            self.screen = "menu"
+            self.render_menu()
+            return
+        self.start_book(self.chapter_book_path, start_position=word_index)
+
     def open_menu_folder(self, path):
         self.menu_path = path
         entries = [("← Back", path.parent)]
@@ -298,13 +393,16 @@ class TempoApp:
         self.menu_index = 0
         self.render_menu()
 
-    def start_book(self, path):
-        words, title, paragraph_ends = load_book(path)
+    def start_book(self, path, start_position=None):
+        words, title, paragraph_ends, chapters = load_book(path)
         position, wpm, saved_theme = load_progress(path.name)
+        if start_position is not None:
+            position = start_position
         self.theme_index = next(
             (index for index, theme in enumerate(THEMES) if theme["name"] == saved_theme), 0
         )
         self.reader = RSVPReader(words, wpm=wpm, position=position, paragraph_ends=paragraph_ends)
+        self.chapters = chapters
         self.book_path = path
         self.screen = "read"
         self.set_chrome_visible(title=False, status=True)
