@@ -62,6 +62,12 @@ SETTING_SPECS = (
         "options": tuple(theme["name"] for theme in THEMES),
         "format": lambda value: value,
     },
+    {
+        "key": "sleep_timer",
+        "label": "Sleep timer",
+        "options": (0, 15, 30, 45, 60, 90),
+        "format": lambda value: "Off" if value == 0 else f"{value} min",
+    },
 )
 
 
@@ -94,6 +100,7 @@ class TempoApp:
         self.pending_words_read = 0
         self.pending_seconds_read = 0.0
         self.last_scheduled_delay = 0.0
+        self.sleep_timer_job = None
         self.cards = []
         self.card_index = 0
         self.card_flipped = False
@@ -534,6 +541,22 @@ class TempoApp:
             text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
             f"  •  {self.reader.position + 1}/{len(self.reader.words)}  •  Center: start"
         )
+        self.schedule_sleep_timer()
+
+    def schedule_sleep_timer(self):
+        self.cancel_sleep_timer()
+        minutes = self.settings.get("sleep_timer", 0)
+        if minutes:
+            self.sleep_timer_job = self.root.after(minutes * 60 * 1000, self.sleep_timer_fired)
+
+    def cancel_sleep_timer(self):
+        if self.sleep_timer_job:
+            self.root.after_cancel(self.sleep_timer_job)
+            self.sleep_timer_job = None
+
+    def sleep_timer_fired(self):
+        self.sleep_timer_job = None
+        self.close()
 
     def render_reading(self):
         self.clear_content()
@@ -757,9 +780,11 @@ class TempoApp:
             self.reader.running = False
 
     def return_to_menu(self):
+        self.cancel_sleep_timer()
         self.show_menu()
 
     def close(self):
+        self.cancel_sleep_timer()
         self.stop_reading()
         self.root.destroy()
 
