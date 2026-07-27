@@ -512,8 +512,19 @@ class TempoApp:
         focus_width = tkfont.Font(font=focus_font).measure(focus_word)
 
         if self.scrolling_preview:
-            preview_font = ("Courier", 22, "normal")
-            measure = tkfont.Font(font=preview_font)
+            # Match normal reading's fonts (bold focus word, smaller context
+            # words) instead of a third, different preview-only font size.
+            focus_measure = tkfont.Font(font=focus_font)
+            context_measure = tkfont.Font(font=context_font)
+            space_width = context_measure.measure(" ")
+
+            def preview_width(words, focus_offset):
+                widths = [
+                    (focus_measure if i == focus_offset else context_measure).measure(word)
+                    for i, word in enumerate(words)
+                ]
+                return sum(widths) + space_width * (len(words) - 1)
+
             available_width = row_width - 48
             preview = [focus_word]
             preview_start = center
@@ -521,17 +532,21 @@ class TempoApp:
                 start = max(0, center - radius)
                 end = min(len(self.reader.words), center + radius + 1)
                 candidate = self.reader.words[start:end]
-                if measure.measure(" ".join(candidate)) <= available_width:
+                if preview_width(candidate, center - start) <= available_width:
                     preview = candidate
                     preview_start = start
                     break
-            x = (row_width - measure.measure(" ".join(preview))) / 2
+
+            focus_offset = center - preview_start
+            x = (row_width - preview_width(preview, focus_offset)) / 2
             highlight_label = None
-            space_width = measure.measure(" ")
             for index, word in enumerate(preview):
-                label = tk.Label(row, text=word, font=preview_font)
+                is_focus = index == focus_offset
+                font = focus_font if is_focus else context_font
+                measure = focus_measure if is_focus else context_measure
+                label = tk.Label(row, text=word, font=font)
                 label.place(x=x, rely=0.5, anchor="w")
-                if preview_start + index == center:
+                if is_focus:
                     highlight_label = label
                 x += measure.measure(word) + space_width
             self.status.config(text=f"Seeking  •  {self.reader.position + 1}/{len(self.reader.words)}")
