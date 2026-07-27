@@ -8,11 +8,12 @@ import tkinter as tk
 from tkinter import font as tkfont
 from pathlib import Path
 
-from bookmanager import load_book, load_cards, load_progress, save_progress
+from bookmanager import load_book, load_cards, load_progress, load_settings, save_progress, save_settings
 from reader import RSVPReader
 
 
 ROOT = Path(__file__).parent
+TOP_LEVEL_MENU_ITEMS = (("Books", ROOT / "books"), ("Flashcards", ROOT / "flashcards"), ("Settings", None))
 HOLD_MS = 500
 REPEAT_MS = 200
 SEEK_INITIAL_REPEAT_MS = 350
@@ -26,6 +27,27 @@ THEMES = (
     {"name": "Focus", "bg": "#101010", "fg": "#f5f5f5", "accent": "#f2c94c", "single_word": True},
     {"name": "ORP", "bg": "#f7f7f7", "fg": "#202020", "accent": "#d62f2f", "single_word": True, "orp": True},
     {"name": "ORP Night", "bg": "#000000", "fg": "#ffffff", "accent": "#ff4b4b", "single_word": True, "orp": True},
+)
+
+SETTING_SPECS = (
+    {
+        "key": "chapter_auto_pause",
+        "label": "Pause at chapters",
+        "options": (True, False),
+        "format": lambda value: "On" if value else "Off",
+    },
+    {
+        "key": "default_wpm",
+        "label": "Default speed",
+        "options": (150, 200, 250, 300, 350, 400, 450, 500),
+        "format": lambda value: f"{value} WPM",
+    },
+    {
+        "key": "default_theme",
+        "label": "Default theme",
+        "options": tuple(theme["name"] for theme in THEMES),
+        "format": lambda value: value,
+    },
 )
 
 
@@ -42,6 +64,8 @@ class TempoApp:
             "right": False,
         }
         self.theme_index = 0
+        self.settings = load_settings()
+        self.settings_index = 0
         self.screen = "menu"
         self.menu_items = []
         self.menu_index = 0
@@ -184,6 +208,13 @@ class TempoApp:
                 self.move_chapters(1)
             else:
                 self.select_chapter()
+        elif self.screen == "settings":
+            if button == "left":
+                self.move_settings(-1)
+            elif button == "right":
+                self.move_settings(1)
+            else:
+                self.select_setting()
         elif self.screen == "read":
             if self.reader.running:
                 if button == "left":
@@ -217,6 +248,10 @@ class TempoApp:
             self.root.destroy()
             return
         if self.screen == "chapters" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen == "settings" and button == "center":
             self.screen = "menu"
             self.render_menu()
             return
@@ -254,7 +289,7 @@ class TempoApp:
         self.stop_reading()
         self.screen = "menu"
         self.menu_path = None
-        self.menu_items = [("Books", ROOT / "books"), ("Flashcards", ROOT / "flashcards")]
+        self.menu_items = TOP_LEVEL_MENU_ITEMS
         self.menu_index = 0
         self.render_menu()
 
@@ -310,11 +345,13 @@ class TempoApp:
         if name == "← Back":
             if self.menu_path in (ROOT / "books", ROOT / "flashcards"):
                 self.menu_path = None
-                self.menu_items = [("Books", ROOT / "books"), ("Flashcards", ROOT / "flashcards")]
+                self.menu_items = TOP_LEVEL_MENU_ITEMS
             else:
                 self.open_menu_folder(path)
             self.menu_index = 0
             self.render_menu()
+        elif name == "Settings":
+            self.show_settings()
         elif path.is_dir():
             self.open_menu_folder(path)
         elif (ROOT / "books") in path.parents:
@@ -329,7 +366,7 @@ class TempoApp:
         if not self.menu_items:
             return None
         name, path = self.menu_items[self.menu_index]
-        if name == "← Back" or path.is_dir():
+        if name == "← Back" or path is None or path.is_dir():
             return None
         if (ROOT / "books") in path.parents:
             return path
@@ -384,6 +421,45 @@ class TempoApp:
             return
         self.start_book(self.chapter_book_path, start_position=word_index)
 
+    def show_settings(self):
+        self.settings_index = 0
+        self.screen = "settings"
+        self.render_settings()
+
+    def settings_row_label(self, index):
+        if index == 0:
+            return "← Back"
+        spec = SETTING_SPECS[index - 1]
+        value = self.settings.get(spec["key"], spec["options"][0])
+        return f"{spec['label']}: {spec['format'](value)}"
+
+    def render_settings(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        selected = self.render_scrolling_list(
+            len(SETTING_SPECS) + 1, self.settings_index, self.settings_row_label
+        )
+        self.apply_theme()
+        if selected:
+            selected.config(fg="red")
+
+    def move_settings(self, amount):
+        self.settings_index = (self.settings_index + amount) % (len(SETTING_SPECS) + 1)
+        self.render_settings()
+
+    def select_setting(self):
+        if self.settings_index == 0:
+            self.screen = "menu"
+            self.render_menu()
+            return
+        spec = SETTING_SPECS[self.settings_index - 1]
+        options = spec["options"]
+        current = self.settings.get(spec["key"], options[0])
+        current_option_index = options.index(current) if current in options else 0
+        self.settings[spec["key"]] = options[(current_option_index + 1) % len(options)]
+        save_settings(self.settings)
+        self.render_settings()
+
     def open_menu_folder(self, path):
         self.menu_path = path
         entries = [("← Back", path.parent)]
@@ -396,11 +472,13 @@ class TempoApp:
 
     def start_book(self, path, start_position=None):
         words, title, paragraph_ends, chapters = load_book(path)
-        position, wpm, saved_theme = load_progress(path.name)
+        default_wpm = self.settings.get("default_wpm", 300)
+        position, wpm, saved_theme = load_progress(path.name, default_wpm=default_wpm)
         if start_position is not None:
             position = start_position
+        theme_name = saved_theme or self.settings.get("default_theme", THEMES[0]["name"])
         self.theme_index = next(
-            (index for index, theme in enumerate(THEMES) if theme["name"] == saved_theme), 0
+            (index for index, theme in enumerate(THEMES) if theme["name"] == theme_name), 0
         )
         self.reader = RSVPReader(words, wpm=wpm, position=position, paragraph_ends=paragraph_ends)
         self.chapters = chapters
@@ -574,7 +652,7 @@ class TempoApp:
         if not self.reader.running:
             return
         self.reader.move(1)
-        if self.reader.position in self.chapter_titles_by_position:
+        if self.settings.get("chapter_auto_pause", True) and self.reader.position in self.chapter_titles_by_position:
             self.pause_for_chapter()
             return
         self.read_tick()

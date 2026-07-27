@@ -4,6 +4,7 @@ from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
 PROGRESS_FILE = DATA_DIR / "progress.json"
+SETTINGS_FILE = DATA_DIR / "settings.json"
 
 # Zero-width non-joiner: an invisible marker the converter (companion side)
 # drops on a chapter heading's first word. Must match CHAPTER_MARKER in
@@ -52,8 +53,20 @@ def save_progress(book, position, wpm, theme):
         json.dump(data, file, indent=2)
 
 
-def load_progress(book):
+def load_progress(book, default_wpm=300):
     if not PROGRESS_FILE.exists():
-        return 0, 300, None
+        return 0, default_wpm, None
     entry = read_json(PROGRESS_FILE).get(book, {})
-    return entry.get("position", 0), entry.get("wpm", 300), entry.get("theme")
+    return entry.get("position", 0), entry.get("wpm", default_wpm), entry.get("theme")
+
+
+def load_settings():
+    if not SETTINGS_FILE.exists():
+        return {}
+    return read_json(SETTINGS_FILE)
+
+
+def save_settings(settings):
+    DATA_DIR.mkdir(exist_ok=True)
+    with open(SETTINGS_FILE, "w", encoding="utf-8") as file:
+        json.dump(settings, file, indent=2)
