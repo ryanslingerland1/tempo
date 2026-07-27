@@ -49,6 +49,7 @@ class TempoApp:
         self.reader = None
         self.book_path = None
         self.chapters = []
+        self.chapter_titles_by_position = {}
         self.chapter_book_path = None
         self.chapter_items = []
         self.chapter_index = 0
@@ -403,6 +404,7 @@ class TempoApp:
         )
         self.reader = RSVPReader(words, wpm=wpm, position=position, paragraph_ends=paragraph_ends)
         self.chapters = chapters
+        self.chapter_titles_by_position = dict(chapters)
         self.book_path = path
         self.screen = "read"
         self.set_chrome_visible(title=False, status=True)
@@ -572,7 +574,18 @@ class TempoApp:
         if not self.reader.running:
             return
         self.reader.move(1)
+        if self.reader.position in self.chapter_titles_by_position:
+            self.pause_for_chapter()
+            return
         self.read_tick()
+
+    def pause_for_chapter(self):
+        self.reader.running = False
+        title = self.chapter_titles_by_position[self.reader.position]
+        self.render_reading()
+        self.status.config(
+            text=f"Chapter: {title}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+        )
 
     def stop_reading(self):
         if self.read_job:
