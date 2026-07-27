@@ -68,6 +68,12 @@ SETTING_SPECS = (
         "options": (0, 15, 30, 45, 60, 90),
         "format": lambda value: "Off" if value == 0 else f"{value} min",
     },
+    {
+        "key": "font_family",
+        "label": "Font",
+        "options": ("Courier", "Helvetica", "Georgia", "Menlo"),
+        "format": lambda value: value,
+    },
 )
 
 
@@ -572,8 +578,9 @@ class TempoApp:
             row_width = 700
         margin = 24
         gap = 20
-        focus_font = ("Courier", 26, "bold")
-        context_font = ("Courier", 16, "normal")
+        font_family = self.settings.get("font_family", "Courier")
+        focus_font = (font_family, 26, "bold")
+        context_font = (font_family, 16, "normal")
         focus_word = self.reader.words[center]
         focus_width = tkfont.Font(font=focus_font).measure(focus_word)
 
