@@ -12,6 +12,8 @@ venv/
 .DS_Store
 
 pico/data/progress.json
+pico/data/settings.json
+pico/data/stats.json
 
 pico/books/*.txt
 
