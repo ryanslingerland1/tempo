@@ -5,6 +5,7 @@ from pathlib import Path
 DATA_DIR = Path(__file__).parent / "data"
 PROGRESS_FILE = DATA_DIR / "progress.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
+STATS_FILE = DATA_DIR / "stats.json"
 
 # Zero-width non-joiner: an invisible marker the converter (companion side)
 # drops on a chapter heading's first word. Must match CHAPTER_MARKER in
@@ -70,3 +71,15 @@ def save_settings(settings):
     DATA_DIR.mkdir(exist_ok=True)
     with open(SETTINGS_FILE, "w", encoding="utf-8") as file:
         json.dump(settings, file, indent=2)
+
+
+def load_stats():
+    if not STATS_FILE.exists():
+        return {"total_words_read": 0, "total_seconds_read": 0}
+    return read_json(STATS_FILE)
+
+
+def save_stats(stats):
+    DATA_DIR.mkdir(exist_ok=True)
+    with open(STATS_FILE, "w", encoding="utf-8") as file:
+        json.dump(stats, file, indent=2)

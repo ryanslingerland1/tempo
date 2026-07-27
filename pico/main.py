@@ -8,12 +8,26 @@ import tkinter as tk
 from tkinter import font as tkfont
 from pathlib import Path
 
-from bookmanager import load_book, load_cards, load_progress, load_settings, save_progress, save_settings
+from bookmanager import (
+    load_book,
+    load_cards,
+    load_progress,
+    load_settings,
+    load_stats,
+    save_progress,
+    save_settings,
+    save_stats,
+)
 from reader import RSVPReader
 
 
 ROOT = Path(__file__).parent
-TOP_LEVEL_MENU_ITEMS = (("Books", ROOT / "books"), ("Flashcards", ROOT / "flashcards"), ("Settings", None))
+TOP_LEVEL_MENU_ITEMS = (
+    ("Books", ROOT / "books"),
+    ("Flashcards", ROOT / "flashcards"),
+    ("Stats", None),
+    ("Settings", None),
+)
 HOLD_MS = 500
 REPEAT_MS = 200
 SEEK_INITIAL_REPEAT_MS = 350
@@ -77,6 +91,9 @@ class TempoApp:
         self.chapter_book_path = None
         self.chapter_items = []
         self.chapter_index = 0
+        self.pending_words_read = 0
+        self.pending_seconds_read = 0.0
+        self.last_scheduled_delay = 0.0
         self.cards = []
         self.card_index = 0
         self.card_flipped = False
@@ -215,6 +232,9 @@ class TempoApp:
                 self.move_settings(1)
             else:
                 self.select_setting()
+        elif self.screen == "stats":
+            self.screen = "menu"
+            self.render_menu()
         elif self.screen == "read":
             if self.reader.running:
                 if button == "left":
@@ -252,6 +272,10 @@ class TempoApp:
             self.render_menu()
             return
         if self.screen == "settings" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen == "stats" and button == "center":
             self.screen = "menu"
             self.render_menu()
             return
@@ -352,6 +376,8 @@ class TempoApp:
             self.render_menu()
         elif name == "Settings":
             self.show_settings()
+        elif name == "Stats":
+            self.show_stats()
         elif path.is_dir():
             self.open_menu_folder(path)
         elif (ROOT / "books") in path.parents:
@@ -459,6 +485,23 @@ class TempoApp:
         self.settings[spec["key"]] = options[(current_option_index + 1) % len(options)]
         save_settings(self.settings)
         self.render_settings()
+
+    def show_stats(self):
+        self.screen = "stats"
+        self.render_stats()
+
+    def render_stats(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        stats = load_stats()
+        total_words = stats.get("total_words_read", 0) + self.pending_words_read
+        total_hours = (stats.get("total_seconds_read", 0) + self.pending_seconds_read) / 3600
+
+        tk.Label(self.content, text="Reading Stats", font=("Helvetica", 15, "bold")).pack(pady=(2, 8))
+        tk.Label(self.content, text=f"{total_hours:.1f} hours read", font=("Helvetica", 17)).pack(pady=3)
+        tk.Label(self.content, text=f"{total_words:,} words read", font=("Helvetica", 17)).pack(pady=3)
+        tk.Label(self.content, text="Center: back", font=("Helvetica", 10)).pack(pady=(8, 0))
+        self.apply_theme()
 
     def open_menu_folder(self, path):
         self.menu_path = path
@@ -662,12 +705,17 @@ class TempoApp:
         if not self.reader.running:
             return
         self.render_reading()
-        self.read_job = self.root.after(int(self.reader.delay() * 1000), self.advance_reading)
+        self.last_scheduled_delay = self.reader.delay()
+        self.read_job = self.root.after(int(self.last_scheduled_delay * 1000), self.advance_reading)
 
     def advance_reading(self):
         self.read_job = None
         if not self.reader.running:
             return
+        # The word we're leaving behind was on screen for last_scheduled_delay
+        # seconds — that's the real, pacing-aware time to credit as "read".
+        self.pending_words_read += 1
+        self.pending_seconds_read += self.last_scheduled_delay
         self.reader.move(1)
         if self.settings.get("chapter_auto_pause", True) and self.reader.position in self.chapter_titles_by_position:
             self.pause_for_chapter()
@@ -676,16 +724,28 @@ class TempoApp:
 
     def pause_for_chapter(self):
         self.reader.running = False
+        self.flush_stats()
         title = self.chapter_titles_by_position[self.reader.position]
         self.render_reading()
         self.status.config(
             text=f"Chapter: {title}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
         )
 
+    def flush_stats(self):
+        if self.pending_words_read == 0 and self.pending_seconds_read == 0:
+            return
+        stats = load_stats()
+        stats["total_words_read"] = stats.get("total_words_read", 0) + self.pending_words_read
+        stats["total_seconds_read"] = stats.get("total_seconds_read", 0) + self.pending_seconds_read
+        save_stats(stats)
+        self.pending_words_read = 0
+        self.pending_seconds_read = 0.0
+
     def stop_reading(self):
         if self.read_job:
             self.root.after_cancel(self.read_job)
             self.read_job = None
+        self.flush_stats()
         if self.reader and self.book_path:
             save_progress(
                 self.book_path.name,
