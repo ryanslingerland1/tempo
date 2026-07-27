@@ -488,7 +488,8 @@ class TempoApp:
         self.set_chrome_visible(title=False, status=True)
         self.render_reading()
         self.status.config(
-            text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  Center: start  •  Center hold: menu"
+            text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+            f"  •  {self.reader.position + 1}/{len(self.reader.words)}  •  Center: start"
         )
 
     def render_reading(self):
@@ -639,6 +640,7 @@ class TempoApp:
         self.render_reading()
         self.status.config(
             text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+            f"  •  {self.reader.position + 1}/{len(self.reader.words)}"
         )
 
     def read_tick(self):
