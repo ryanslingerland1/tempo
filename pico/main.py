@@ -682,8 +682,23 @@ class TempoApp:
         total = len(self.reader.words)
         position = self.reader.position + 1
         if self.settings.get("progress_display", "words") == "percent":
-            return f"{position * 100 // total}%"
-        return f"{position}/{total}"
+            progress = f"{position * 100 // total}%"
+        else:
+            progress = f"{position}/{total}"
+        chapter = self.chapter_position_text()
+        if chapter:
+            return f"Ch {chapter}  •  {progress}"
+        return progress
+
+    def chapter_position_text(self):
+        if not self.chapters:
+            return None
+        current = 0
+        for index, (word_index, _title) in enumerate(self.chapters):
+            if word_index > self.reader.position:
+                break
+            current = index + 1
+        return f"{current}/{len(self.chapters)}"
 
     def remaining_time_text(self):
         words_remaining = len(self.reader.words) - self.reader.position
