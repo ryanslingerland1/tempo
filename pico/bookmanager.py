@@ -38,6 +38,11 @@ def load_book(filename):
     return words, Path(filename).stem.replace("_", " ").title(), paragraph_ends, chapters
 
 
+def book_word_count(filename):
+    with open(filename, encoding="utf-8") as file:
+        return len(file.read().split())
+
+
 def load_cards(filename):
     data = read_json(filename)
     cards = data.get("cards", [])

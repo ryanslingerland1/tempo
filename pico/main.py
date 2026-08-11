@@ -9,6 +9,7 @@ from tkinter import font as tkfont
 from pathlib import Path
 
 from bookmanager import (
+    book_word_count,
     load_book,
     load_cards,
     load_progress,
@@ -372,12 +373,60 @@ class TempoApp:
     def render_menu(self):
         self.clear_content()
         self.set_chrome_visible(title=False, status=False)
-        selected = self.render_scrolling_list(
-            len(self.menu_items), self.menu_index, lambda i: self.menu_items[i][0]
-        )
+        is_book_listing = self.menu_path is not None and self.menu_path.is_relative_to(ROOT / "books")
+        if is_book_listing:
+            self.render_book_list()
+        else:
+            selected = self.render_scrolling_list(
+                len(self.menu_items), self.menu_index, lambda i: self.menu_items[i][0]
+            )
+            self.apply_theme()
+            if selected:
+                selected.config(fg="red")
+
+    def render_book_list(self):
+        menu_font = ("Helvetica", 18)
+        row_pady = 2
+        self.root.update_idletasks()
+        available_height = self.content.winfo_height()
+        if available_height <= 1:
+            available_height = 110
+        row_height = tkfont.Font(font=menu_font).metrics("linespace") + 2 * row_pady
+        visible_count = max(1, available_height // row_height)
+
+        count = len(self.menu_items)
+        if count <= visible_count:
+            start = 0
+        else:
+            start = min(max(0, self.menu_index - visible_count // 2), count - visible_count)
+
+        theme = THEMES[self.theme_index]
+        selected_label = None
+        bar_width, bar_height = 46, 8
+        for offset in range(min(visible_count, count - start)):
+            index = start + offset
+            name, path = self.menu_items[index]
+            prefix = "› " if index == self.menu_index else "  "
+
+            row = tk.Frame(self.content)
+            row.pack(fill="x", pady=row_pady)
+            label = tk.Label(row, text=prefix + name, anchor="w", font=menu_font)
+            label.pack(side="left", fill="x", expand=True)
+            if index == self.menu_index:
+                selected_label = label
+
+            if name not in ("← Back",) and not path.is_dir():
+                canvas = tk.Canvas(row, width=bar_width, height=bar_height, highlightthickness=0, bd=0)
+                canvas.pack(side="right", padx=(8, 4))
+                self.draw_pill(canvas, 0, 0, bar_width, bar_height, "#8a8a8a")
+                fraction = self.book_progress_fraction(path)
+                if fraction > 0:
+                    fill_width = max(bar_height, bar_width * fraction)
+                    self.draw_pill(canvas, 0, 0, fill_width, bar_height, theme["accent"])
+
         self.apply_theme()
-        if selected:
-            selected.config(fg="red")
+        if selected_label:
+            selected_label.config(fg="red")
 
     def move_menu(self, amount):
         self.menu_index = (self.menu_index + amount) % len(self.menu_items)
@@ -531,6 +580,21 @@ class TempoApp:
         self.menu_items = entries
         self.menu_index = 0
         self.render_menu()
+
+    def book_progress_fraction(self, path):
+        position, _wpm, _theme = load_progress(path.name)
+        total = book_word_count(path)
+        return position / total if total else 0
+
+    def draw_pill(self, canvas, x0, y0, x1, y1, color):
+        height = y1 - y0
+        radius = height / 2
+        if x1 - x0 < height:
+            x1 = x0 + height
+        canvas.create_oval(x0, y0, x0 + height, y1, fill=color, outline=color)
+        canvas.create_oval(x1 - height, y0, x1, y1, fill=color, outline=color)
+        if x1 - radius > x0 + radius:
+            canvas.create_rectangle(x0 + radius, y0, x1 - radius, y1, fill=color, outline=color)
 
     def start_book(self, path, start_position=None):
         words, title, paragraph_ends, chapters = load_book(path)
