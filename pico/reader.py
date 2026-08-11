@@ -1,5 +1,8 @@
 import string
 
+MIN_WPM = 25
+MAX_WPM = 1000
+
 SENTENCE_PAUSE = 3.0
 CLAUSE_PAUSE = 2.0
 PARAGRAPH_PAUSE = 3.75
@@ -20,7 +23,7 @@ class RSVPReader:
             raise ValueError("A book needs at least one word.")
         self.words = words
         self.position = max(0, min(position, len(words) - 1))
-        self.wpm = max(25, wpm)
+        self.wpm = max(MIN_WPM, min(MAX_WPM, wpm))
         self.running = False
         self.paragraph_ends = paragraph_ends or set()
 
@@ -59,7 +62,7 @@ class RSVPReader:
         return base
 
     def increase_speed(self):
-        self.wpm += 25
+        self.wpm = min(MAX_WPM, self.wpm + 25)
 
     def decrease_speed(self):
-        self.wpm = max(25, self.wpm - 25)
+        self.wpm = max(MIN_WPM, self.wpm - 25)
