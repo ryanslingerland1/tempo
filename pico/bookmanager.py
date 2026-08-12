@@ -1,4 +1,5 @@
 import json
+import time
 from pathlib import Path
 
 
@@ -72,6 +73,27 @@ def book_word_count(filename):
     return len(text.split())
 
 
+def peek_book_meta(filename):
+    """Read just the title/author header, without parsing the whole book
+    into words — cheap enough to call once per book when building a sorted
+    list. Falls back to a filename-derived title when there's no header."""
+    title = None
+    author = None
+    with open(filename, encoding="utf-8") as file:
+        if file.readline().strip() == META_SENTINEL:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    break
+                if line.startswith("Title:"):
+                    title = line[len("Title:"):].strip()
+                elif line.startswith("Author:"):
+                    author = line[len("Author:"):].strip()
+    if not title:
+        title = Path(filename).stem.replace("_", " ").title()
+    return title, author
+
+
 def load_cards(filename):
     data = read_json(filename)
     cards = data.get("cards", [])
@@ -83,7 +105,7 @@ def load_cards(filename):
 def save_progress(book, position, wpm, theme):
     DATA_DIR.mkdir(exist_ok=True)
     data = read_json(PROGRESS_FILE) if PROGRESS_FILE.exists() else {}
-    data[book] = {"position": position, "wpm": wpm, "theme": theme}
+    data[book] = {"position": position, "wpm": wpm, "theme": theme, "last_read": time.time()}
     with open(PROGRESS_FILE, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=2)
 
@@ -93,6 +115,13 @@ def load_progress(book, default_wpm=300):
         return 0, default_wpm, None
     entry = read_json(PROGRESS_FILE).get(book, {})
     return entry.get("position", 0), entry.get("wpm", default_wpm), entry.get("theme")
+
+
+def load_last_read(book):
+    if not PROGRESS_FILE.exists():
+        return 0
+    entry = read_json(PROGRESS_FILE).get(book, {})
+    return entry.get("last_read", 0)
 
 
 def load_settings():

@@ -12,9 +12,11 @@ from bookmanager import (
     book_word_count,
     load_book,
     load_cards,
+    load_last_read,
     load_progress,
     load_settings,
     load_stats,
+    peek_book_meta,
     save_progress,
     save_settings,
     save_stats,
@@ -29,6 +31,15 @@ TOP_LEVEL_MENU_ITEMS = (
     ("Stats", None),
     ("Settings", None),
 )
+# Sentinel used as the "path" of the sort-order row in a book listing — not
+# a real Path, so every place that unpacks (name, path) from menu_items must
+# check for it before calling Path-only methods like is_dir().
+SORT_TOGGLE_PATH = "__sort__"
+BOOK_SORT_LABELS = {
+    "author": "Sort: Author A-Z",
+    "title": "Sort: Title A-Z",
+    "recent": "Sort: Recently Read",
+}
 HOLD_MS = 500
 REPEAT_MS = 200
 SEEK_INITIAL_REPEAT_MS = 350
@@ -99,6 +110,7 @@ class TempoApp:
         self.theme_index = 0
         self.settings = load_settings()
         self.settings_index = 0
+        self.book_sort_mode = self.settings.get("book_sort_mode", "recent")
         self.screen = "menu"
         self.menu_items = []
         self.menu_index = 0
@@ -417,7 +429,7 @@ class TempoApp:
             if index == self.menu_index:
                 selected_label = label
 
-            if name not in ("← Back",) and not path.is_dir():
+            if isinstance(path, Path) and not path.is_dir():
                 canvas = tk.Canvas(row, width=bar_width, height=bar_height, highlightthickness=0, bd=0)
                 canvas.pack(side="right", padx=(8, 4))
                 self.draw_pill(canvas, 0, 0, bar_width, bar_height, "#8a8a8a")
@@ -444,6 +456,8 @@ class TempoApp:
                 self.open_menu_folder(path)
             self.menu_index = 0
             self.render_menu()
+        elif path == SORT_TOGGLE_PATH:
+            self.cycle_book_sort()
         elif name == "Settings":
             self.show_settings()
         elif name == "Stats":
@@ -457,12 +471,13 @@ class TempoApp:
 
     def selected_menu_book_path(self):
         """The path of the currently highlighted menu row, if (and only if)
-        it's an actual book file — not a folder, "Back", or flashcard deck.
+        it's an actual book file — not a folder, "Back", the sort toggle,
+        or a flashcard deck.
         """
         if not self.menu_items:
             return None
         name, path = self.menu_items[self.menu_index]
-        if name == "← Back" or path is None or path.is_dir():
+        if name == "← Back" or not isinstance(path, Path) or path.is_dir():
             return None
         if (ROOT / "books") in path.parents:
             return path
@@ -573,15 +588,47 @@ class TempoApp:
         tk.Label(self.content, text="Center: back", font=("Helvetica", 10)).pack(pady=(8, 0))
         self.apply_theme()
 
-    def open_menu_folder(self, path):
+    def open_menu_folder(self, path, keep_index=False):
         self.menu_path = path
         entries = [("← Back", path.parent)]
+        is_books = path.is_relative_to(ROOT / "books")
+        if is_books:
+            entries.append((BOOK_SORT_LABELS[self.book_sort_mode], SORT_TOGGLE_PATH))
         entries.extend((f"📁 {entry.name}", entry) for entry in sorted(path.iterdir()) if entry.is_dir())
-        pattern = "*.txt" if path.is_relative_to(ROOT / "books") else "*.json"
-        entries.extend((entry.stem.replace("_", " ").title(), entry) for entry in sorted(path.glob(pattern)))
+        pattern = "*.txt" if is_books else "*.json"
+        book_files = list(path.glob(pattern))
+        if is_books:
+            entries.extend(self.sorted_book_entries(book_files))
+        else:
+            entries.extend((entry.stem.replace("_", " ").title(), entry) for entry in sorted(book_files))
         self.menu_items = entries
-        self.menu_index = 0
+        if not keep_index:
+            self.menu_index = 0
         self.render_menu()
+
+    def sorted_book_entries(self, book_files):
+        books = []
+        for entry_path in book_files:
+            title, author = peek_book_meta(entry_path)
+            last_read = load_last_read(entry_path.name) if self.book_sort_mode == "recent" else 0
+            books.append((entry_path, title, author, last_read))
+
+        if self.book_sort_mode == "recent":
+            books.sort(key=lambda book: -book[3])
+        elif self.book_sort_mode == "author":
+            books.sort(key=lambda book: (book[2] is None, (book[2] or "").lower(), book[1].lower()))
+        else:  # "title"
+            books.sort(key=lambda book: book[1].lower())
+
+        return [(title, entry_path) for entry_path, title, _author, _last_read in books]
+
+    def cycle_book_sort(self):
+        modes = list(BOOK_SORT_LABELS)
+        next_index = (modes.index(self.book_sort_mode) + 1) % len(modes)
+        self.book_sort_mode = modes[next_index]
+        self.settings["book_sort_mode"] = self.book_sort_mode
+        save_settings(self.settings)
+        self.open_menu_folder(self.menu_path, keep_index=True)
 
     def book_progress_fraction(self, path):
         position, _wpm, _theme = load_progress(path.name)
