@@ -127,7 +127,7 @@ QLabel#statusLabel[state="idle"] {
     color: #6d6f80;
 }
 
-QListWidget#bookList {
+QTreeWidget#bookTree {
     background-color: #191b22;
     border: 1px solid #24263355;
     border-radius: 12px;
@@ -135,18 +135,45 @@ QListWidget#bookList {
     outline: none;
 }
 
-QListWidget#bookList::item {
-    padding: 9px 10px;
+QTreeWidget#bookTree::item {
+    padding: 6px 4px;
     border-radius: 8px;
-    margin: 2px 0px;
+    margin: 1px 0px;
 }
 
-QListWidget#bookList::item:selected {
+QTreeWidget#bookTree::item:selected {
     background-color: #23263a;
 }
 
-QListWidget#bookList::item:hover {
+QTreeWidget#bookTree::item:hover {
     background-color: #1d1f2c;
+}
+
+QTreeWidget#bookTree::branch {
+    background: transparent;
+}
+
+QPushButton#secondaryButton {
+    background-color: transparent;
+    color: #b6b8c6;
+    border: 1px solid #33354a;
+    border-radius: 8px;
+    padding: 5px 12px;
+    font-size: 12px;
+}
+
+QPushButton#secondaryButton:hover {
+    background-color: #1d1f2c;
+    color: #f4f4f8;
+}
+
+QLabel#destinationLabel {
+    color: #8b8d9c;
+    font-size: 12px;
+}
+
+QLabel#destinationLabel[hasCustomPath="true"] {
+    color: #29d3c1;
 }
 
 QScrollBar:vertical {

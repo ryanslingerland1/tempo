@@ -4,24 +4,25 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QColor, QDragEnterEvent, QDropEvent
+from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
     QFileDialog,
     QFrame,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
-from converter import CONVERTERS, convert, strip_meta_header, suggest_author, suggest_title
+from converter import CONVERTERS, convert, peek_meta, strip_meta_header, suggest_author, suggest_title
 
 PICO_BOOKS_DIR = Path(__file__).resolve().parent.parent / "pico" / "books"
 STYLE_PATH = Path(__file__).resolve().parent / "style.qss"
@@ -116,6 +117,7 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.source_path = None
+        self.destination_folder = PICO_BOOKS_DIR
 
         self.setObjectName("root")
         self.setWindowTitle("Tempo Companion")
@@ -161,6 +163,10 @@ class MainWindow(QWidget):
         self.name_pacing_checkbox.setChecked(True)
         root_layout.addWidget(self.name_pacing_checkbox)
 
+        self.destination_label = QLabel("")
+        self.destination_label.setObjectName("destinationLabel")
+        root_layout.addWidget(self.destination_label)
+
         self.convert_button = QPushButton("Convert && Add to Pico")
         self.convert_button.setObjectName("primaryButton")
         self.convert_button.setEnabled(False)
@@ -178,13 +184,26 @@ class MainWindow(QWidget):
         library_header = QHBoxLayout()
         library_header.addWidget(self._section_label("BOOKS ON THE PICO"))
         library_header.addStretch()
+        self.new_folder_button = QPushButton("+ New Folder")
+        self.new_folder_button.setObjectName("secondaryButton")
+        self.new_folder_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.new_folder_button.clicked.connect(self.create_folder)
+        library_header.addWidget(self.new_folder_button)
         root_layout.addLayout(library_header)
 
-        self.book_list = QListWidget()
-        self.book_list.setObjectName("bookList")
-        root_layout.addWidget(self.book_list, stretch=1)
+        self.book_tree = QTreeWidget()
+        self.book_tree.setObjectName("bookTree")
+        self.book_tree.setHeaderHidden(True)
+        self.book_tree.itemClicked.connect(self.on_tree_item_clicked)
+        root_layout.addWidget(self.book_tree, stretch=1)
 
-        self.refresh_book_list()
+        library_hint = QLabel("Click a folder (or a book inside one) to choose where new conversions are saved.")
+        library_hint.setObjectName("destinationLabel")
+        library_hint.setWordWrap(True)
+        root_layout.addWidget(library_hint)
+
+        self.refresh_library_tree()
+        self._update_destination_label()
 
     @staticmethod
     def _section_label(text):
@@ -213,19 +232,19 @@ class MainWindow(QWidget):
             return
         title = self.title_input.text().strip() or self.source_path.stem
         author = self.author_input.text().strip()
-        destination = PICO_BOOKS_DIR / f"{slugify(title)}.txt"
+        destination = self.destination_folder / f"{slugify(title)}.txt"
 
         if destination.exists():
             answer = QMessageBox.question(
                 self,
                 "Overwrite?",
-                f'"{destination.name}" already exists on the Pico. Overwrite it?',
+                f'"{destination.name}" already exists there. Overwrite it?',
             )
             if answer != QMessageBox.StandardButton.Yes:
                 return
 
         try:
-            PICO_BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+            self.destination_folder.mkdir(parents=True, exist_ok=True)
             text = convert(
                 self.source_path,
                 destination,
@@ -241,25 +260,79 @@ class MainWindow(QWidget):
         word_count = len(strip_meta_header(text).split())
         byline = f" by {author}" if author else ""
         self._set_status(
-            f'Added "{title}"{byline} to the Pico ({word_count:,} words) as {destination.name}',
+            f'Added "{title}"{byline} ({word_count:,} words) as {destination.name}',
             "success",
         )
-        self.refresh_book_list()
+        self.refresh_library_tree()
 
-    def refresh_book_list(self):
-        self.book_list.clear()
-        books = sorted(PICO_BOOKS_DIR.glob("*.txt")) if PICO_BOOKS_DIR.exists() else []
-        if not books:
-            item = QListWidgetItem("No books yet — convert one above")
-            item.setFlags(Qt.ItemFlag.NoItemFlags)
-            item.setForeground(QColor("#55576a"))
-            self.book_list.addItem(item)
+    def create_folder(self):
+        parent = self._selected_folder() or PICO_BOOKS_DIR
+        name, ok = QInputDialog.getText(self, "New Folder", "Folder name:")
+        name = name.strip()
+        if not ok or not name:
             return
-        for book_path in books:
-            text = strip_meta_header(book_path.read_text(encoding="utf-8"))
-            word_count = len(text.split())
-            name = book_path.stem.replace("_", " ").title()
-            self.book_list.addItem(f"{name}  ·  {word_count:,} words")
+        new_folder = parent / name
+        if new_folder.exists():
+            QMessageBox.warning(self, "Already exists", f'"{name}" already exists there.')
+            return
+        try:
+            new_folder.mkdir(parents=True)
+        except OSError as error:
+            QMessageBox.warning(self, "Couldn't create folder", str(error))
+            return
+        self.refresh_library_tree()
+        self._set_status(f'Created folder "{name}"', "success")
+
+    def on_tree_item_clicked(self, item, _column):
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        if path is None:
+            return
+        self.destination_folder = path if path.is_dir() else path.parent
+        self._update_destination_label()
+
+    def _selected_folder(self):
+        item = self.book_tree.currentItem()
+        if item is None:
+            return None
+        path = item.data(0, Qt.ItemDataRole.UserRole)
+        return path if path and path.is_dir() else None
+
+    def _update_destination_label(self):
+        try:
+            relative = self.destination_folder.relative_to(PICO_BOOKS_DIR)
+            display = "Books" if str(relative) == "." else f"Books/{relative}"
+        except ValueError:
+            display = str(self.destination_folder)
+        self.destination_label.setText(f"Save to: {display}")
+        self.destination_label.setProperty("hasCustomPath", self.destination_folder != PICO_BOOKS_DIR)
+        self.destination_label.style().unpolish(self.destination_label)
+        self.destination_label.style().polish(self.destination_label)
+
+    def refresh_library_tree(self):
+        self.book_tree.clear()
+        PICO_BOOKS_DIR.mkdir(parents=True, exist_ok=True)
+        root_item = QTreeWidgetItem(["📚 Books"])
+        root_item.setData(0, Qt.ItemDataRole.UserRole, PICO_BOOKS_DIR)
+        self.book_tree.addTopLevelItem(root_item)
+        self._populate_tree(PICO_BOOKS_DIR, root_item)
+        self.book_tree.expandAll()
+
+    def _populate_tree(self, folder, parent_item):
+        entries = sorted(folder.iterdir(), key=lambda entry: (entry.is_file(), entry.name.lower()))
+        for entry in entries:
+            if entry.is_dir():
+                item = QTreeWidgetItem([f"📁 {entry.name}"])
+                item.setData(0, Qt.ItemDataRole.UserRole, entry)
+                parent_item.addChild(item)
+                self._populate_tree(entry, item)
+            elif entry.suffix == ".txt":
+                title, author = peek_meta(entry)
+                text = strip_meta_header(entry.read_text(encoding="utf-8"))
+                word_count = len(text.split())
+                byline = f"  ·  {author}" if author else ""
+                item = QTreeWidgetItem([f"{title}{byline}  ·  {word_count:,} words"])
+                item.setData(0, Qt.ItemDataRole.UserRole, entry)
+                parent_item.addChild(item)
 
     def _set_status(self, text, state):
         self.status_label.setText(text)

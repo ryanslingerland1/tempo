@@ -278,6 +278,28 @@ def strip_meta_header(text):
     return rest
 
 
+def peek_meta(path):
+    """Read just the title/author header (if present) without parsing the
+    whole book — used to label entries in the companion's library view.
+    Mirrors peek_book_meta in pico/bookmanager.py.
+    """
+    title = None
+    author = None
+    with open(path, encoding="utf-8") as file:
+        if file.readline().strip() == META_SENTINEL:
+            for line in file:
+                line = line.strip()
+                if not line:
+                    break
+                if line.startswith("Title:"):
+                    title = line[len("Title:"):].strip()
+                elif line.startswith("Author:"):
+                    author = line[len("Author:"):].strip()
+    if not title:
+        title = Path(path).stem.replace("_", " ").title()
+    return title, author
+
+
 def convert(
     input_path,
     output_path,
