@@ -12,15 +12,42 @@ STATS_FILE = DATA_DIR / "stats.json"
 # companion/converter.py.
 CHAPTER_MARKER = "‌"
 
+# A small metadata header the converter writes at the top of the file, kept
+# as separate Title/Author fields (rather than one string) so a future
+# sort-by-author or sort-by-title feature has clean data to work with.
+# Must match META_SENTINEL in companion/converter.py.
+META_SENTINEL = "%%TEMPO-META%%"
+
 
 def read_json(filename):
     with open(filename, encoding="utf-8") as file:
         return json.load(file)
 
 
+def _split_meta_header(text):
+    """Strip a leading %%TEMPO-META%% header block, if present, returning
+    (title, author, remaining_text). Books converted before this feature
+    existed have no header, so title/author both come back None.
+    """
+    if not text.startswith(META_SENTINEL):
+        return None, None, text
+    header, _sep, rest = text.partition("\n\n")
+    title = None
+    author = None
+    for line in header.splitlines()[1:]:
+        if line.startswith("Title:"):
+            title = line[len("Title:"):].strip()
+        elif line.startswith("Author:"):
+            author = line[len("Author:"):].strip()
+    return title, author, rest
+
+
 def load_book(filename):
     with open(filename, encoding="utf-8") as file:
         text = file.read()
+    title, author, text = _split_meta_header(text)
+    if title is None:
+        title = Path(filename).stem.replace("_", " ").title()
     words = []
     paragraph_ends = set()
     chapters = []
@@ -35,12 +62,14 @@ def load_book(filename):
         paragraph_ends.add(len(words) - 1)
     if not words:
         raise ValueError(f"{filename} has no book text.")
-    return words, Path(filename).stem.replace("_", " ").title(), paragraph_ends, chapters
+    return words, title, author, paragraph_ends, chapters
 
 
 def book_word_count(filename):
     with open(filename, encoding="utf-8") as file:
-        return len(file.read().split())
+        text = file.read()
+    _title, _author, text = _split_meta_header(text)
+    return len(text.split())
 
 
 def load_cards(filename):

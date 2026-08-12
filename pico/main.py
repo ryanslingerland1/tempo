@@ -105,6 +105,8 @@ class TempoApp:
         self.menu_path = None
         self.reader = None
         self.book_path = None
+        self.book_title = None
+        self.book_author = None
         self.chapters = []
         self.chapter_titles_by_position = {}
         self.chapter_book_path = None
@@ -484,7 +486,7 @@ class TempoApp:
             self.select_menu()
 
     def show_chapters(self, path):
-        _words, _title, _paragraph_ends, chapters = load_book(path)
+        _words, _title, _author, _paragraph_ends, chapters = load_book(path)
         if not chapters:
             return
         self.chapter_book_path = path
@@ -597,7 +599,7 @@ class TempoApp:
             canvas.create_rectangle(x0 + radius, y0, x1 - radius, y1, fill=color, outline=color)
 
     def start_book(self, path, start_position=None):
-        words, title, paragraph_ends, chapters = load_book(path)
+        words, title, author, paragraph_ends, chapters = load_book(path)
         default_wpm = self.settings.get("default_wpm", 300)
         position, wpm, saved_theme = load_progress(path.name, default_wpm=default_wpm)
         if start_position is not None:
@@ -610,6 +612,8 @@ class TempoApp:
         self.chapters = chapters
         self.chapter_titles_by_position = dict(chapters)
         self.book_path = path
+        self.book_title = title
+        self.book_author = author
         self.screen = "read"
         self.set_chrome_visible(title=False, status=True)
         self.render_reading()

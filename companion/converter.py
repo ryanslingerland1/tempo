@@ -63,6 +63,13 @@ NAME_RUN_RE = re.compile(r"\b[A-Z][a-z'\-]*(?:\s+[A-Z][a-z'\-]*)+\b")
 # chapters itself. Must match CHAPTER_MARKER in pico/bookmanager.py.
 CHAPTER_MARKER = "‌"
 
+# A small metadata header written at the very top of the output file, kept
+# separate from title/author instead of both in one string, so a future
+# sort-by-author or sort-by-title feature has clean fields to work with.
+# Must match META_SENTINEL/the "Title:"/"Author:" format in
+# pico/bookmanager.py.
+META_SENTINEL = "%%TEMPO-META%%"
+
 
 def _normalize_ellipsis(text):
     """Collapse a spaced-out ellipsis ("word . . .") into a single glyph
@@ -210,12 +217,21 @@ def epub_title(path):
     return titles[0][0] if titles else None
 
 
+def epub_author(path):
+    creators = _read_epub(path).get_metadata("DC", "creator")
+    return creators[0][0] if creators else None
+
+
 CONVERTERS = {
     ".epub": epub_to_text,
 }
 
 TITLE_READERS = {
     ".epub": epub_title,
+}
+
+AUTHOR_READERS = {
+    ".epub": epub_author,
 }
 
 
@@ -232,7 +248,44 @@ def suggest_title(path):
     return path.stem.replace("_", " ").replace("-", " ").title()
 
 
-def convert(input_path, output_path, skip_front_matter=True, mark_name_introductions=True):
+def suggest_author(path):
+    path = Path(path)
+    reader = AUTHOR_READERS.get(path.suffix.lower())
+    if reader:
+        try:
+            author = reader(path)
+            if author:
+                return author
+        except Exception:
+            pass
+    return ""
+
+
+def _build_meta_header(title, author):
+    lines = [META_SENTINEL]
+    if title:
+        lines.append(f"Title: {title}")
+    if author:
+        lines.append(f"Author: {author}")
+    return "\n".join(lines)
+
+
+def strip_meta_header(text):
+    """Remove a leading %%TEMPO-META%% header block, if present."""
+    if not text.startswith(META_SENTINEL):
+        return text
+    _header, _sep, rest = text.partition("\n\n")
+    return rest
+
+
+def convert(
+    input_path,
+    output_path,
+    skip_front_matter=True,
+    mark_name_introductions=True,
+    title=None,
+    author=None,
+):
     input_path = Path(input_path)
     converter = CONVERTERS.get(input_path.suffix.lower())
     if converter is None:
@@ -245,6 +298,8 @@ def convert(input_path, output_path, skip_front_matter=True, mark_name_introduct
         skip_front_matter=skip_front_matter,
         mark_name_introductions=mark_name_introductions,
     )
+    if title or author:
+        text = f"{_build_meta_header(title, author)}\n\n{text}"
     Path(output_path).write_text(text, encoding="utf-8")
     return text
 
@@ -266,6 +321,8 @@ def main():
         action="store_false",
         help="Don't give a name's first appearance a longer pause (default: do)",
     )
+    parser.add_argument("--title", help="Book title to embed (defaults to ebook metadata/filename)")
+    parser.add_argument("--author", help="Author to embed, so a future sort feature can use it")
     parser.set_defaults(skip_front_matter=True, mark_name_introductions=True)
     args = parser.parse_args()
     convert(
@@ -273,6 +330,8 @@ def main():
         args.output,
         skip_front_matter=args.skip_front_matter,
         mark_name_introductions=args.mark_name_introductions,
+        title=args.title or suggest_title(args.input),
+        author=args.author or suggest_author(args.input),
     )
 
 

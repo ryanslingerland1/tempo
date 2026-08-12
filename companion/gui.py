@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from converter import CONVERTERS, convert, suggest_title
+from converter import CONVERTERS, convert, strip_meta_header, suggest_author, suggest_title
 
 PICO_BOOKS_DIR = Path(__file__).resolve().parent.parent / "pico" / "books"
 STYLE_PATH = Path(__file__).resolve().parent / "style.qss"
@@ -119,8 +119,8 @@ class MainWindow(QWidget):
 
         self.setObjectName("root")
         self.setWindowTitle("Tempo Companion")
-        self.resize(520, 640)
-        self.setMinimumSize(460, 560)
+        self.resize(520, 690)
+        self.setMinimumSize(460, 600)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(28, 26, 28, 24)
@@ -146,6 +146,12 @@ class MainWindow(QWidget):
         self.title_input = QLineEdit()
         self.title_input.setPlaceholderText("Book title")
         root_layout.addWidget(self.title_input)
+
+        root_layout.addWidget(self._section_label("AUTHOR"))
+
+        self.author_input = QLineEdit()
+        self.author_input.setPlaceholderText("Author (kept separate from title for future sorting)")
+        root_layout.addWidget(self.author_input)
 
         self.skip_front_matter_checkbox = QCheckBox("Skip to Chapter 1 (leave out title page, TOC, foreword, etc.)")
         self.skip_front_matter_checkbox.setChecked(True)
@@ -198,6 +204,7 @@ class MainWindow(QWidget):
         self.source_path = Path(path)
         self.drop_zone.set_file(self.source_path.name)
         self.title_input.setText(suggest_title(self.source_path))
+        self.author_input.setText(suggest_author(self.source_path))
         self.convert_button.setEnabled(True)
         self._set_status("", "idle")
 
@@ -205,6 +212,7 @@ class MainWindow(QWidget):
         if not self.source_path:
             return
         title = self.title_input.text().strip() or self.source_path.stem
+        author = self.author_input.text().strip()
         destination = PICO_BOOKS_DIR / f"{slugify(title)}.txt"
 
         if destination.exists():
@@ -223,14 +231,17 @@ class MainWindow(QWidget):
                 destination,
                 skip_front_matter=self.skip_front_matter_checkbox.isChecked(),
                 mark_name_introductions=self.name_pacing_checkbox.isChecked(),
+                title=title,
+                author=author,
             )
         except Exception as error:
             self._set_status(f"Failed: {error}", "error")
             return
 
-        word_count = len(text.split())
+        word_count = len(strip_meta_header(text).split())
+        byline = f" by {author}" if author else ""
         self._set_status(
-            f'Added "{title}" to the Pico ({word_count:,} words) as {destination.name}',
+            f'Added "{title}"{byline} to the Pico ({word_count:,} words) as {destination.name}',
             "success",
         )
         self.refresh_book_list()
@@ -245,7 +256,8 @@ class MainWindow(QWidget):
             self.book_list.addItem(item)
             return
         for book_path in books:
-            word_count = len(book_path.read_text(encoding="utf-8").split())
+            text = strip_meta_header(book_path.read_text(encoding="utf-8"))
+            word_count = len(text.split())
             name = book_path.stem.replace("_", " ").title()
             self.book_list.addItem(f"{name}  ·  {word_count:,} words")
 
