@@ -1,11 +1,13 @@
 """PySide6 GUI: drag an ebook in, get it converted and placed on the Pico."""
 import re
+import shutil
 import sys
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QDragEnterEvent, QDropEvent
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QApplication,
     QCheckBox,
     QFileDialog,
@@ -32,6 +34,14 @@ def slugify(title):
     slug = re.sub(r"[^\w\s-]", "", title).strip().lower()
     slug = re.sub(r"[\s-]+", "_", slug)
     return slug or "book"
+
+
+def format_library_path(folder):
+    try:
+        relative = folder.relative_to(PICO_BOOKS_DIR)
+        return "Books" if str(relative) == "." else f"Books/{relative}"
+    except ValueError:
+        return str(folder)
 
 
 class DropZone(QFrame):
@@ -113,6 +123,75 @@ class DropZone(QFrame):
         self.subtitle_label.setText("or click to browse  ·  .epub supported")
 
 
+class BookTree(QTreeWidget):
+    """The library tree, with drag-and-drop to reorganize books/folders that
+    are already on the Pico — separate from the DropZone above, which is
+    only for importing new ebooks.
+    """
+
+    library_changed = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+
+    def dragEnterEvent(self, event):
+        if event.source() is self:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event):
+        if event.source() is self:
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event: QDropEvent):
+        # Only handle drags that originated inside this tree — dropping a
+        # file from Finder here isn't supported (use the drop zone above).
+        if event.source() is not self:
+            event.ignore()
+            return
+
+        source_item = self.currentItem()
+        source_path = source_item.data(0, Qt.ItemDataRole.UserRole) if source_item else None
+        if not isinstance(source_path, Path) or source_path == PICO_BOOKS_DIR:
+            event.ignore()
+            return
+
+        target_item = self.itemAt(event.position().toPoint())
+        target_folder = PICO_BOOKS_DIR
+        if target_item is not None:
+            target_path = target_item.data(0, Qt.ItemDataRole.UserRole)
+            if isinstance(target_path, Path):
+                target_folder = target_path if target_path.is_dir() else target_path.parent
+
+        if source_path.is_dir() and (target_folder == source_path or target_folder.is_relative_to(source_path)):
+            event.ignore()
+            return
+        if target_folder == source_path.parent:
+            event.ignore()
+            return
+
+        destination = target_folder / source_path.name
+        if destination.exists():
+            answer = QMessageBox.question(
+                self, "Overwrite?", f'"{source_path.name}" already exists there. Overwrite it?'
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
+        target_folder.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source_path), str(destination))
+        event.acceptProposedAction()
+        self.library_changed.emit(f'Moved "{source_path.name}" to {format_library_path(target_folder)}')
+
+
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
@@ -191,13 +270,17 @@ class MainWindow(QWidget):
         library_header.addWidget(self.new_folder_button)
         root_layout.addLayout(library_header)
 
-        self.book_tree = QTreeWidget()
+        self.book_tree = BookTree()
         self.book_tree.setObjectName("bookTree")
         self.book_tree.setHeaderHidden(True)
         self.book_tree.itemClicked.connect(self.on_tree_item_clicked)
+        self.book_tree.library_changed.connect(self.on_library_changed)
         root_layout.addWidget(self.book_tree, stretch=1)
 
-        library_hint = QLabel("Click a folder (or a book inside one) to choose where new conversions are saved.")
+        library_hint = QLabel(
+            "Click a folder (or a book inside one) to choose where new conversions are saved. "
+            "Drag books or folders onto each other to reorganize."
+        )
         library_hint.setObjectName("destinationLabel")
         library_hint.setWordWrap(True)
         root_layout.addWidget(library_hint)
@@ -290,6 +373,15 @@ class MainWindow(QWidget):
         self.destination_folder = path if path.is_dir() else path.parent
         self._update_destination_label()
 
+    def on_library_changed(self, message):
+        # A drag-drop move may have relocated the folder we were about to
+        # save into — reset to root rather than risk pointing at a path
+        # that no longer exists.
+        self.destination_folder = PICO_BOOKS_DIR
+        self._update_destination_label()
+        self._set_status(message, "success")
+        self.refresh_library_tree()
+
     def _selected_folder(self):
         item = self.book_tree.currentItem()
         if item is None:
@@ -298,12 +390,7 @@ class MainWindow(QWidget):
         return path if path and path.is_dir() else None
 
     def _update_destination_label(self):
-        try:
-            relative = self.destination_folder.relative_to(PICO_BOOKS_DIR)
-            display = "Books" if str(relative) == "." else f"Books/{relative}"
-        except ValueError:
-            display = str(self.destination_folder)
-        self.destination_label.setText(f"Save to: {display}")
+        self.destination_label.setText(f"Save to: {format_library_path(self.destination_folder)}")
         self.destination_label.setProperty("hasCustomPath", self.destination_folder != PICO_BOOKS_DIR)
         self.destination_label.style().unpolish(self.destination_label)
         self.destination_label.style().polish(self.destination_label)
