@@ -7,6 +7,7 @@ DATA_DIR = Path(__file__).parent / "data"
 PROGRESS_FILE = DATA_DIR / "progress.json"
 SETTINGS_FILE = DATA_DIR / "settings.json"
 STATS_FILE = DATA_DIR / "stats.json"
+FLASHCARD_SESSIONS_FILE = DATA_DIR / "flashcard_sessions.json"
 
 # Zero-width non-joiner: an invisible marker the converter (companion side)
 # drops on a chapter heading's first word. Must match CHAPTER_MARKER in
@@ -100,6 +101,58 @@ def load_cards(filename):
     if not all(isinstance(card, dict) and {"front", "back"} <= card.keys() for card in cards):
         raise ValueError(f"{filename} cards must each contain 'front' and 'back'.")
     return cards, data.get("title", Path(filename).stem.replace("_", " ").title())
+
+
+def _flashcard_session_key(filename):
+    """Use a project-relative path so decks with the same filename do not collide."""
+    path = Path(filename).resolve()
+    project_root = Path(__file__).parent.resolve()
+    try:
+        return str(path.relative_to(project_root))
+    except ValueError:
+        return str(path)
+
+
+def _valid_cards(cards):
+    return isinstance(cards, list) and all(
+        isinstance(card, dict) and {"front", "back"} <= card.keys() for card in cards
+    )
+
+
+def load_flashcard_session(filename, default_cards):
+    """Return a deck's saved active pile and selected card position.
+
+    A missing session deliberately differs from an empty saved pile: an empty
+    pile means the user completed that deck and should see "Deck complete".
+    """
+    if not FLASHCARD_SESSIONS_FILE.exists():
+        return list(default_cards), 0
+
+    sessions = read_json(FLASHCARD_SESSIONS_FILE).get("decks", {})
+    session = sessions.get(_flashcard_session_key(filename))
+    if not isinstance(session, dict) or not _valid_cards(session.get("cards")):
+        return list(default_cards), 0
+
+    cards = session["cards"]
+    if not cards:
+        return [], 0
+    position = session.get("position", 0)
+    if not isinstance(position, int):
+        position = 0
+    return cards, max(0, min(position, len(cards) - 1))
+
+
+def save_flashcard_session(filename, cards, position):
+    """Persist the remaining flashcard pile and the next card to show."""
+    DATA_DIR.mkdir(exist_ok=True)
+    data = read_json(FLASHCARD_SESSIONS_FILE) if FLASHCARD_SESSIONS_FILE.exists() else {}
+    decks = data.setdefault("decks", {})
+    decks[_flashcard_session_key(filename)] = {
+        "cards": cards,
+        "position": 0 if not cards else max(0, min(position, len(cards) - 1)),
+    }
+    with open(FLASHCARD_SESSIONS_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
 
 
 def save_progress(book, position, wpm, theme):

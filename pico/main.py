@@ -12,12 +12,14 @@ from bookmanager import (
     book_word_count,
     load_book,
     load_cards,
+    load_flashcard_session,
     load_last_read,
     load_progress,
     load_settings,
     load_stats,
     peek_book_meta,
     save_progress,
+    save_flashcard_session,
     save_settings,
     save_stats,
 )
@@ -131,6 +133,7 @@ class TempoApp:
         self.cards = []
         self.card_index = 0
         self.card_flipped = False
+        self.card_deck_path = None
         self.held = {"left": False, "center": False, "right": False}
         self.hold_jobs = {}
         self.repeat_jobs = {}
@@ -931,16 +934,19 @@ class TempoApp:
 
     def return_to_menu(self):
         self.cancel_sleep_timer()
+        self.save_current_flashcard_session()
         self.show_menu()
 
     def close(self):
         self.cancel_sleep_timer()
         self.stop_reading()
+        self.save_current_flashcard_session()
         self.root.destroy()
 
     def start_cards(self, path):
-        self.cards, title = load_cards(path)
-        self.card_index = 0
+        deck_cards, title = load_cards(path)
+        self.cards, self.card_index = load_flashcard_session(path, deck_cards)
+        self.card_deck_path = path
         self.card_flipped = False
         self.screen = "cards"
         self.set_chrome_visible(title=True, status=True)
@@ -972,7 +978,12 @@ class TempoApp:
         else:
             self.card_index = (self.card_index + 1) % len(self.cards)
         self.card_flipped = False
+        self.save_current_flashcard_session()
         self.render_card()
+
+    def save_current_flashcard_session(self):
+        if self.card_deck_path is not None:
+            save_flashcard_session(self.card_deck_path, self.cards, self.card_index)
 
     def apply_theme(self):
         theme = THEMES[self.theme_index]

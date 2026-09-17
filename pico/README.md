@@ -57,6 +57,7 @@ While seeking, Tempo temporarily displays a line of nearby words so it is easy t
 - Put books in `books/` as UTF-8 `.txt` files.
 - Put flashcard decks in `flashcards/` as JSON files.
 - Tempo saves each book's position, WPM, and selected theme to `data/progress.json`.
+- Tempo saves each flashcard deck's remaining pile and next-card position to `data/flashcard_sessions.json`.
 
 ### Flashcard deck format
 

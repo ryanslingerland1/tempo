@@ -14,6 +14,7 @@ venv/
 pico/data/progress.json
 pico/data/settings.json
 pico/data/stats.json
+pico/data/flashcard_sessions.json
 
 pico/books/*.txt
 
