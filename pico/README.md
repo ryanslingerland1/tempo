@@ -52,6 +52,8 @@ While seeking, Tempo temporarily displays a line of nearby words so it is easy t
 | Center hold | Return to the menu |
 | Right tap | Mark the card as known and remove it from the current session |
 
+To reset a deck, highlight it in the Flashcards list and double-tap Center. Select **Reset deck**, then select **Reset deck** again on the confirmation screen. A normal Center tap resumes the deck.
+
 ## Content and saved data
 
 - Put books in `books/` as UTF-8 `.txt` files.

@@ -155,6 +155,21 @@ def save_flashcard_session(filename, cards, position):
         json.dump(data, file, indent=2)
 
 
+def reset_flashcard_session(filename):
+    """Remove a deck's saved pile so its next opening starts fresh."""
+    if not FLASHCARD_SESSIONS_FILE.exists():
+        return
+    data = read_json(FLASHCARD_SESSIONS_FILE)
+    decks = data.get("decks", {})
+    key = _flashcard_session_key(filename)
+    if key not in decks:
+        return
+    decks.pop(key)
+    data["decks"] = decks
+    with open(FLASHCARD_SESSIONS_FILE, "w", encoding="utf-8") as file:
+        json.dump(data, file, indent=2)
+
+
 def save_progress(book, position, wpm, theme):
     DATA_DIR.mkdir(exist_ok=True)
     data = read_json(PROGRESS_FILE) if PROGRESS_FILE.exists() else {}

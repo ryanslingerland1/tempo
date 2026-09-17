@@ -18,6 +18,7 @@ from bookmanager import (
     load_settings,
     load_stats,
     peek_book_meta,
+    reset_flashcard_session,
     save_progress,
     save_flashcard_session,
     save_settings,
@@ -134,6 +135,8 @@ class TempoApp:
         self.card_index = 0
         self.card_flipped = False
         self.card_deck_path = None
+        self.deck_action_path = None
+        self.deck_action_index = 0
         self.held = {"left": False, "center": False, "right": False}
         self.hold_jobs = {}
         self.repeat_jobs = {}
@@ -251,7 +254,7 @@ class TempoApp:
                 self.move_menu(-1)
             elif button == "right":
                 self.move_menu(1)
-            elif self.selected_menu_book_path():
+            elif self.selected_menu_book_path() or self.selected_menu_flashcard_path():
                 self.menu_center_tap()
             else:
                 self.select_menu()
@@ -262,6 +265,20 @@ class TempoApp:
                 self.move_chapters(1)
             else:
                 self.select_chapter()
+        elif self.screen == "deck_actions":
+            if button == "left":
+                self.move_deck_actions(-1)
+            elif button == "right":
+                self.move_deck_actions(1)
+            else:
+                self.select_deck_action()
+        elif self.screen == "deck_reset_confirm":
+            if button == "left":
+                self.move_deck_actions(-1)
+            elif button == "right":
+                self.move_deck_actions(1)
+            else:
+                self.select_deck_reset_confirmation()
         elif self.screen == "settings":
             if button == "left":
                 self.move_settings(-1)
@@ -305,6 +322,10 @@ class TempoApp:
             self.root.destroy()
             return
         if self.screen == "chapters" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen in ("deck_actions", "deck_reset_confirm") and button == "center":
             self.screen = "menu"
             self.render_menu()
             return
@@ -486,15 +507,28 @@ class TempoApp:
             return path
         return None
 
+    def selected_menu_flashcard_path(self):
+        """Return the selected deck path only when a JSON flashcard deck is selected."""
+        if not self.menu_items:
+            return None
+        name, path = self.menu_items[self.menu_index]
+        if name == "← Back" or not isinstance(path, Path) or path.is_dir():
+            return None
+        if (ROOT / "flashcards") in path.parents:
+            return path
+        return None
+
     def menu_center_tap(self):
-        """A second center tap on a book opens its chapter list instead of
-        starting it, mirroring the existing double-tap-for-theme gesture."""
+        """A second Center tap opens actions for the selected book or deck."""
         if self.pending_center_tap:
             self.root.after_cancel(self.pending_center_tap)
             self.pending_center_tap = None
-            path = self.selected_menu_book_path()
-            if path:
-                self.show_chapters(path)
+            book_path = self.selected_menu_book_path()
+            deck_path = self.selected_menu_flashcard_path()
+            if book_path:
+                self.show_chapters(book_path)
+            elif deck_path:
+                self.show_deck_actions(deck_path)
             return
         self.pending_center_tap = self.root.after(300, self.menu_single_tap)
 
@@ -534,6 +568,53 @@ class TempoApp:
             self.render_menu()
             return
         self.start_book(self.chapter_book_path, start_position=word_index)
+
+    def deck_action_rows(self):
+        if self.screen == "deck_reset_confirm":
+            return ("Cancel", "Reset deck")
+        return ("Resume deck", "Reset deck", "← Back")
+
+    def show_deck_actions(self, path):
+        self.deck_action_path = path
+        self.deck_action_index = 0
+        self.screen = "deck_actions"
+        self.render_deck_actions("Deck actions")
+
+    def render_deck_actions(self, heading):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        tk.Label(self.content, text=heading, font=("Helvetica", 15, "bold")).pack(pady=(2, 8))
+        rows = self.deck_action_rows()
+        selected = self.render_scrolling_list(len(rows), self.deck_action_index, lambda i: rows[i])
+        self.apply_theme()
+        if selected:
+            selected.config(fg="red")
+
+    def move_deck_actions(self, amount):
+        self.deck_action_index = (self.deck_action_index + amount) % len(self.deck_action_rows())
+        heading = "Reset this deck?" if self.screen == "deck_reset_confirm" else "Deck actions"
+        self.render_deck_actions(heading)
+
+    def select_deck_action(self):
+        action = self.deck_action_rows()[self.deck_action_index]
+        if action == "Resume deck":
+            self.start_cards(self.deck_action_path)
+        elif action == "Reset deck":
+            self.deck_action_index = 0
+            self.screen = "deck_reset_confirm"
+            self.render_deck_actions("Reset this deck?")
+        else:
+            self.screen = "menu"
+            self.render_menu()
+
+    def select_deck_reset_confirmation(self):
+        if self.deck_action_rows()[self.deck_action_index] == "Reset deck":
+            reset_flashcard_session(self.deck_action_path)
+            self.start_cards(self.deck_action_path)
+        else:
+            self.deck_action_index = 0
+            self.screen = "deck_actions"
+            self.render_deck_actions("Deck actions")
 
     def show_settings(self):
         self.settings_index = 0
