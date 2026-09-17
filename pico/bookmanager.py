@@ -142,17 +142,42 @@ def load_flashcard_session(filename, default_cards):
     return cards, max(0, min(position, len(cards) - 1))
 
 
-def save_flashcard_session(filename, cards, position):
-    """Persist the remaining flashcard pile and the next card to show."""
+def save_flashcard_session(filename, cards, position, total_cards=None):
+    """Persist a deck's remaining pile, position, and original card count."""
     DATA_DIR.mkdir(exist_ok=True)
     data = read_json(FLASHCARD_SESSIONS_FILE) if FLASHCARD_SESSIONS_FILE.exists() else {}
     decks = data.setdefault("decks", {})
-    decks[_flashcard_session_key(filename)] = {
+    key = _flashcard_session_key(filename)
+    existing_session = decks.get(key, {})
+    saved_total = existing_session.get("total_cards", 0) if isinstance(existing_session, dict) else 0
+    if not isinstance(saved_total, int) or saved_total < len(cards):
+        saved_total = 0
+    total_cards = max(saved_total, total_cards or 0, len(cards))
+    decks[key] = {
         "cards": cards,
         "position": 0 if not cards else max(0, min(position, len(cards) - 1)),
+        "total_cards": total_cards,
     }
     with open(FLASHCARD_SESSIONS_FILE, "w", encoding="utf-8") as file:
         json.dump(data, file, indent=2)
+
+
+def load_flashcard_metrics(filename, default_total=0):
+    """Return a deck's current mastered/remaining totals.
+
+    A card becomes mastered only when it is marked known and removed from the
+    active pile. Cycling a card with "keep" does not count against mastery.
+    """
+    defaults = {"total": default_total, "mastered": 0, "remaining": default_total}
+    if not FLASHCARD_SESSIONS_FILE.exists():
+        return defaults
+    session = read_json(FLASHCARD_SESSIONS_FILE).get("decks", {}).get(_flashcard_session_key(filename), {})
+    if not isinstance(session, dict) or not _valid_cards(session.get("cards")):
+        return defaults
+    remaining = len(session["cards"])
+    saved_total = session.get("total_cards", 0)
+    total = max(default_total, remaining, saved_total if isinstance(saved_total, int) else 0)
+    return {"total": total, "mastered": total - remaining, "remaining": remaining}
 
 
 def reset_flashcard_session(filename):
@@ -206,7 +231,11 @@ def save_settings(settings):
 
 def load_stats():
     if not STATS_FILE.exists():
-        return {"total_words_read": 0, "total_seconds_read": 0}
+        return {
+            "total_words_read": 0,
+            "total_seconds_read": 0,
+            "flashcards_reviewed": 0,
+        }
     return read_json(STATS_FILE)
 
 
@@ -214,3 +243,10 @@ def save_stats(stats):
     DATA_DIR.mkdir(exist_ok=True)
     with open(STATS_FILE, "w", encoding="utf-8") as file:
         json.dump(stats, file, indent=2)
+
+
+def record_flashcard_result():
+    """Record one card decision for the lifetime statistics screen."""
+    stats = load_stats()
+    stats["flashcards_reviewed"] = stats.get("flashcards_reviewed", 0) + 1
+    save_stats(stats)

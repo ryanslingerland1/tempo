@@ -60,6 +60,7 @@ To reset a deck, highlight it in the Flashcards list and double-tap Center. Sele
 - Put flashcard decks in `flashcards/` as JSON files.
 - Tempo saves each book's position, WPM, and selected theme to `data/progress.json`.
 - Tempo saves each flashcard deck's remaining pile and next-card position to `data/flashcard_sessions.json`.
+- The Stats page tracks reading time/words plus total flashcards reviewed. Double-tap Center on a deck to see its current mastered/remaining cards and mastery rate.
 
 ### Flashcard deck format
 

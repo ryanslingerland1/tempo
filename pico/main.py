@@ -13,11 +13,13 @@ from bookmanager import (
     load_book,
     load_cards,
     load_flashcard_session,
+    load_flashcard_metrics,
     load_last_read,
     load_progress,
     load_settings,
     load_stats,
     peek_book_meta,
+    record_flashcard_result,
     reset_flashcard_session,
     save_progress,
     save_flashcard_session,
@@ -135,6 +137,7 @@ class TempoApp:
         self.card_index = 0
         self.card_flipped = False
         self.card_deck_path = None
+        self.card_total_cards = 0
         self.deck_action_path = None
         self.deck_action_index = 0
         self.held = {"left": False, "center": False, "right": False}
@@ -587,6 +590,18 @@ class TempoApp:
         self.clear_content()
         self.set_chrome_visible(title=False, status=False)
         tk.Label(self.content, text=heading, font=("Helvetica", 15, "bold")).pack(pady=(2, 8))
+        if self.screen == "deck_actions":
+            deck_cards, _title = load_cards(self.deck_action_path)
+            metrics = load_flashcard_metrics(self.deck_action_path, default_total=len(deck_cards))
+            success_rate = metrics["mastered"] * 100 // metrics["total"] if metrics["total"] else 0
+            tk.Label(
+                self.content,
+                text=(
+                    f"Mastered: {metrics['mastered']}/{metrics['total']}"
+                    f"  •  Left: {metrics['remaining']}  •  {success_rate}%"
+                ),
+                font=("Helvetica", 10),
+            ).pack(pady=(0, 3))
         rows = self.deck_action_rows()
         selected = self.render_scrolling_list(len(rows), self.deck_action_index, lambda i: rows[i])
         self.apply_theme()
@@ -668,11 +683,16 @@ class TempoApp:
         stats = load_stats()
         total_words = stats.get("total_words_read", 0) + self.pending_words_read
         total_hours = (stats.get("total_seconds_read", 0) + self.pending_seconds_read) / 3600
+        cards_reviewed = stats.get("flashcards_reviewed", 0)
 
-        tk.Label(self.content, text="Reading Stats", font=("Helvetica", 15, "bold")).pack(pady=(2, 8))
-        tk.Label(self.content, text=f"{total_hours:.1f} hours read", font=("Helvetica", 17)).pack(pady=3)
-        tk.Label(self.content, text=f"{total_words:,} words read", font=("Helvetica", 17)).pack(pady=3)
-        tk.Label(self.content, text="Center: back", font=("Helvetica", 10)).pack(pady=(8, 0))
+        tk.Label(self.content, text="Stats", font=("Helvetica", 15, "bold")).pack(pady=(2, 5))
+        tk.Label(
+            self.content,
+            text=f"Reading: {total_hours:.1f} h  •  {total_words:,} words",
+            font=("Helvetica", 12),
+        ).pack(pady=1)
+        tk.Label(self.content, text=f"Flashcards reviewed: {cards_reviewed:,}", font=("Helvetica", 12)).pack(pady=1)
+        tk.Label(self.content, text="Center: back", font=("Helvetica", 9)).pack(pady=(4, 0))
         self.apply_theme()
 
     def open_menu_folder(self, path, keep_index=False):
@@ -1031,6 +1051,7 @@ class TempoApp:
         deck_cards, title = load_cards(path)
         self.cards, self.card_index = load_flashcard_session(path, deck_cards)
         self.card_deck_path = path
+        self.card_total_cards = len(deck_cards)
         self.card_flipped = False
         self.screen = "cards"
         self.set_chrome_visible(title=False, status=True)
@@ -1101,6 +1122,7 @@ class TempoApp:
     def next_card(self, known):
         if not self.cards:
             return
+        record_flashcard_result()
         if known:
             self.cards.pop(self.card_index)
             if self.cards:
@@ -1113,7 +1135,12 @@ class TempoApp:
 
     def save_current_flashcard_session(self):
         if self.card_deck_path is not None:
-            save_flashcard_session(self.card_deck_path, self.cards, self.card_index)
+            save_flashcard_session(
+                self.card_deck_path,
+                self.cards,
+                self.card_index,
+                total_cards=self.card_total_cards,
+            )
 
     def apply_theme(self):
         theme = THEMES[self.theme_index]
