@@ -177,7 +177,10 @@ class TempoApp:
         self.content.pack(expand=True, fill="both", padx=30)
         if status:
             self.status.pack(pady=6)
-        self.controls.pack(pady=(0, 20))
+        # The desktop prototype is keyboard-driven until physical buttons are
+        # connected. Do not reserve screen space for an empty button frame.
+        if getattr(self, "buttons", {}):
+            self.controls.pack(pady=(0, 20))
 
     def bind_keys(self):
         bindings = {"left": ("<Left>", "<a>", "<A>"), "center": ("<space>", "<Return>", "<s>", "<S>"), "right": ("<Right>", "<d>", "<D>")}
@@ -1030,24 +1033,70 @@ class TempoApp:
         self.card_deck_path = path
         self.card_flipped = False
         self.screen = "cards"
-        self.set_chrome_visible(title=True, status=True)
+        self.set_chrome_visible(title=False, status=True)
         self.title_label.config(text=title)
         self.render_card()
 
     def render_card(self):
         self.clear_content()
         if not self.cards:
-            tk.Label(self.content, text="Deck complete!", font=("Helvetica", 28, "bold")).pack(expand=True)
-            self.status.config(text="Center hold: return to menu")
+            tk.Label(self.content, text="Deck complete!", font=("Helvetica", 22, "bold")).pack(expand=True)
+            self.status.config(text="Hold Center: menu")
             self.apply_theme()
             return
         card = self.cards[self.card_index]
         text = card["back"] if self.card_flipped else card["front"]
         side = "Answer" if self.card_flipped else "Question"
-        tk.Label(self.content, text=side, font=("Helvetica", 14)).pack(pady=8)
-        tk.Label(self.content, text=text, wraplength=700, justify="center", font=("Helvetica", 28, "bold")).pack(expand=True)
-        self.status.config(text=f"Card {self.card_index + 1}/{len(self.cards)}  •  Left: keep  Center: flip  Right: know")
+        tk.Label(self.content, text=side, font=("Helvetica", 10)).pack(pady=(3, 0))
+        self.root.update_idletasks()
+        max_width = max(120, self.content.winfo_width() - 20)
+        max_height = max(45, self.content.winfo_height() - 24)
+        font, wrapped_text = self.flashcard_text_layout(text, max_width, max_height)
+        tk.Label(
+            self.content,
+            text=wrapped_text,
+            justify="center",
+            font=font,
+        ).pack(expand=True, fill="both", padx=10, pady=(0, 2))
+        self.status.config(
+            text=f"{self.card_index + 1}/{len(self.cards)}  •  L: keep  C: flip  R: know"
+        )
         self.apply_theme()
+
+    def flashcard_text_layout(self, text, max_width, max_height):
+        """Pick the largest readable card font whose wrapped text fits the display."""
+        family = self.settings.get("font_family", "Courier")
+        for size in range(24, 9, -1):
+            font = tkfont.Font(family=family, size=size, weight="bold")
+            lines = self.wrap_flashcard_text(text, font, max_width)
+            if len(lines) * font.metrics("linespace") <= max_height:
+                return (family, size, "bold"), "\n".join(lines)
+        font = tkfont.Font(family=family, size=10, weight="bold")
+        return (family, 10, "bold"), "\n".join(self.wrap_flashcard_text(text, font, max_width))
+
+    @staticmethod
+    def wrap_flashcard_text(text, font, max_width):
+        """Word-wrap text, splitting a lone overlong word only when needed."""
+        lines = []
+        current = ""
+        for word in text.split():
+            candidate = word if not current else f"{current} {word}"
+            if font.measure(candidate) <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+                current = ""
+            while font.measure(word) > max_width:
+                split_at = 1
+                while split_at < len(word) and font.measure(word[:split_at + 1]) <= max_width:
+                    split_at += 1
+                lines.append(word[:split_at])
+                word = word[split_at:]
+            current = word
+        if current or not lines:
+            lines.append(current)
+        return lines
 
     def next_card(self, known):
         if not self.cards:
