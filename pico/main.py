@@ -1068,10 +1068,12 @@ class TempoApp:
         card = self.cards[self.card_index]
         text = card["back"] if self.card_flipped else card["front"]
         side = "Answer" if self.card_flipped else "Question"
-        tk.Label(self.content, text=side, font=("Helvetica", 10)).pack(pady=(3, 0))
+        side_font = ("Helvetica", 10)
+        tk.Label(self.content, text=side, font=side_font).pack(pady=(3, 0))
         self.root.update_idletasks()
         max_width = max(120, self.content.winfo_width() - 20)
-        max_height = max(45, self.content.winfo_height() - 24)
+        heading_height = tkfont.Font(font=side_font).metrics("linespace") + 6
+        max_height = max(1, self.content.winfo_height() - heading_height - 4)
         font, wrapped_text = self.flashcard_text_layout(text, max_width, max_height)
         tk.Label(
             self.content,
@@ -1087,13 +1089,20 @@ class TempoApp:
     def flashcard_text_layout(self, text, max_width, max_height):
         """Pick the largest readable card font whose wrapped text fits the display."""
         family = self.settings.get("font_family", "Courier")
-        for size in range(24, 9, -1):
+        # Start large for short cards and keep reducing until *both* the
+        # wrapped line count and every long word fit inside the card area.
+        # There is intentionally no artificial 10-point floor: a longer card
+        # must remain visible rather than being clipped off the tiny display.
+        for size in range(30, 0, -1):
             font = tkfont.Font(family=family, size=size, weight="bold")
             lines = self.wrap_flashcard_text(text, font, max_width)
             if len(lines) * font.metrics("linespace") <= max_height:
                 return (family, size, "bold"), "\n".join(lines)
-        font = tkfont.Font(family=family, size=10, weight="bold")
-        return (family, 10, "bold"), "\n".join(self.wrap_flashcard_text(text, font, max_width))
+        # One point is the smallest Tk font. Reaching it means the card is
+        # exceptionally long, but returning the fully wrapped text still
+        # avoids horizontal clipping.
+        font = tkfont.Font(family=family, size=1, weight="bold")
+        return (family, 1, "bold"), "\n".join(self.wrap_flashcard_text(text, font, max_width))
 
     @staticmethod
     def wrap_flashcard_text(text, font, max_width):
