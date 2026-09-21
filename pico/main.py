@@ -1080,7 +1080,7 @@ class TempoApp:
             font=font,
         ).pack(expand=True, fill="both", padx=10, pady=(0, 2))
         self.status.config(
-            text=f"{self.card_index + 1}/{len(self.cards)}  •  L: keep  C: flip  R: know"
+            text=f"{len(self.cards)} left  •  L: keep  C: flip  R: know"
         )
         self.apply_theme()
 
