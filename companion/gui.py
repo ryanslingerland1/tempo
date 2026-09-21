@@ -69,7 +69,7 @@ class DropZone(QFrame):
         self.title_label.setObjectName("dropTitle")
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.subtitle_label = QLabel("or click to browse  ·  .epub supported")
+        self.subtitle_label = QLabel("or click to browse  ·  .epub and .pdf supported")
         self.subtitle_label.setObjectName("dropSubtitle")
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -120,7 +120,7 @@ class DropZone(QFrame):
         self._set_property("hasFile", False)
         self.icon_label.setText("📖")
         self.title_label.setText("Drop an ebook here")
-        self.subtitle_label.setText("or click to browse  ·  .epub supported")
+        self.subtitle_label.setText("or click to browse  ·  .epub and .pdf supported")
 
 
 class BookTree(QTreeWidget):

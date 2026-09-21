@@ -5,6 +5,7 @@ paragraph breaks for pacing); words within a paragraph are whitespace
 separated, matching what bookmanager.load_book parses.
 """
 import argparse
+from collections import Counter
 import re
 from pathlib import Path
 
@@ -28,6 +29,13 @@ CHAPTER_KEYWORD_RE = re.compile(r"^(chapter|part|book)\b", re.IGNORECASE)
 PROLOGUE_RE = re.compile(r"^prologue\b", re.IGNORECASE)
 LEADING_CAPS_RE = re.compile(r"^([A-Z][A-Z']*(?:\s+[A-Z][A-Z']*)+)\b")
 TITLE_LINE_MAX_LENGTH = 60
+PDF_HEADER_FOOTER_THRESHOLD = 0.6
+PDF_PAGE_NUMBER_RE = re.compile(r"^(?:page\s+)?\d+(?:\s+(?:of|/)\s+\d+)?$", re.IGNORECASE)
+PDF_ROMAN_PAGE_NUMBER_RE = re.compile(r"^[ivxlcdm]+$")
+PDF_CHAPTER_HEADING_RE = re.compile(
+    r"^(?:chapter|part|book)\s+(\d+|[ivxlcdm]+|" + "|".join(NUMBER_WORDS) + r")\b",
+    re.IGNORECASE,
+)
 
 # Common short words that should drop back to lowercase when de-capitalizing
 # a styled run (e.g. "RAN" in "SHE RAN"). Anything NOT in this list is left
@@ -222,16 +230,192 @@ def epub_author(path):
     return creators[0][0] if creators else None
 
 
+def _pdf_reader(path):
+    """Open a selectable-text PDF, with a helpful message if pypdf is absent."""
+    try:
+        from pypdf import PdfReader
+    except ImportError as error:
+        raise RuntimeError(
+            "PDF support needs the 'pypdf' package. Install the Companion requirements first."
+        ) from error
+
+    reader = PdfReader(str(path))
+    if reader.is_encrypted and not reader.decrypt(""):
+        raise ValueError("This PDF is password-protected and cannot be converted.")
+    return reader
+
+
+def _clean_pdf_line(line):
+    return " ".join(line.replace("\u00ad", "").split())
+
+
+def _is_pdf_page_number(line):
+    return bool(PDF_PAGE_NUMBER_RE.fullmatch(line) or PDF_ROMAN_PAGE_NUMBER_RE.fullmatch(line.lower()))
+
+
+def _pdf_chapter_key(text):
+    """Return a normalized numbered chapter key, or None for non-chapters.
+
+    PDF front matter often contains standalone years (for example, "1846")
+    that the EPUB-oriented generic heading detector correctly supports but
+    must not mistake for a PDF chapter heading.
+    """
+    match = PDF_CHAPTER_HEADING_RE.match(text.strip())
+    return match.group(1).lower() if match else None
+
+
+def _is_pdf_chapter_heading(text):
+    return _pdf_chapter_key(text) is not None or bool(PROLOGUE_RE.match(text.strip()))
+
+
+def _recurring_pdf_edge_lines(page_lines):
+    """Find repeated top/bottom lines, which are usually headers or footers."""
+    if len(page_lines) < 2:
+        return set()
+    edge_counts = Counter()
+    for lines in page_lines:
+        edge_counts.update(set(lines[:2] + lines[-2:]))
+    minimum_occurrences = max(2, int(len(page_lines) * PDF_HEADER_FOOTER_THRESHOLD + 0.999))
+    return {line for line, count in edge_counts.items() if count >= minimum_occurrences}
+
+
+def _join_pdf_lines(lines):
+    """Rebuild one paragraph while repairing line-wrap hyphenation."""
+    text = ""
+    for line in lines:
+        if not text:
+            text = line
+        elif text.endswith("-") and line[:1].islower():
+            text = text[:-1] + line
+        else:
+            text += " " + line
+    return _normalize_ellipsis(text)
+
+
+def _pdf_paragraphs(page_lines):
+    """Turn cleaned page lines into reader paragraphs and chapter markers."""
+    paragraphs = []
+    for lines in page_lines:
+        current = []
+
+        def flush():
+            if current:
+                paragraph = _join_pdf_lines(current)
+                if len(paragraph) > TITLE_LINE_MAX_LENGTH:
+                    paragraph = _fix_leading_caps(paragraph)
+                paragraphs.append(paragraph)
+                current.clear()
+
+        for line in lines:
+            if not line:
+                flush()
+                continue
+            # A short standalone chapter heading should not be joined to the
+            # following prose just because the source PDF omitted a blank line.
+            if len(line) <= TITLE_LINE_MAX_LENGTH and _is_pdf_chapter_heading(line):
+                flush()
+                paragraphs.append(line)
+                continue
+            current.append(line)
+        flush()
+    return paragraphs
+
+
+def _pdf_body_start_index(paragraphs):
+    """Find the first real chapter after an opening table of contents.
+
+    A contents page commonly lists many Chapter 1, Chapter 2, ... entries.
+    If five or more numbered headings appear in the opening paragraphs, find
+    the later repeat of the first chapter number: that is where the book's
+    prose actually begins. PDFs without that signature retain the prior
+    behavior of starting at their first detected chapter.
+    """
+    headings = [(index, _pdf_chapter_key(paragraph)) for index, paragraph in enumerate(paragraphs)]
+    headings = [(index, key) for index, key in headings if key is not None]
+    opening_headings = [(index, key) for index, key in headings if index < 40]
+    if len(opening_headings) >= 5:
+        first_index, first_key = opening_headings[0]
+        for index, key in headings:
+            if index > first_index and key == first_key:
+                return index
+    for index, _key in headings:
+        return index
+    for index, paragraph in enumerate(paragraphs):
+        if PROLOGUE_RE.match(paragraph.strip()):
+            return index
+    return None
+
+
+def pdf_to_text(path, skip_front_matter=True, mark_name_introductions=True):
+    """Convert a selectable-text PDF into Tempo's paragraph-based text format.
+
+    Image-only/scanned PDFs have no embedded words, so they are rejected with
+    an OCR-specific message instead of yielding an empty or corrupted book.
+    """
+    reader = _pdf_reader(path)
+    page_lines = []
+    extracted_characters = 0
+    for page in reader.pages:
+        text = page.extract_text() or ""
+        extracted_characters += len(text.strip())
+        page_lines.append([_clean_pdf_line(line) for line in text.splitlines()])
+
+    if extracted_characters < 100:
+        raise ValueError(
+            "No usable selectable text was found. This appears to be a scanned PDF and needs OCR."
+        )
+
+    edge_lines = _recurring_pdf_edge_lines(page_lines)
+    cleaned_pages = []
+    for lines in page_lines:
+        cleaned_pages.append([
+            line for line in lines
+            if line not in edge_lines and not _is_pdf_page_number(line)
+        ])
+
+    paragraphs = _pdf_paragraphs(cleaned_pages)
+    if skip_front_matter:
+        start_index = _pdf_body_start_index(paragraphs)
+        if start_index is not None:
+            paragraphs = paragraphs[start_index:]
+
+    marked_paragraphs = []
+    for paragraph in paragraphs:
+        if _is_pdf_chapter_heading(paragraph):
+            paragraph = CHAPTER_MARKER + paragraph
+        marked_paragraphs.append(paragraph)
+
+    if mark_name_introductions:
+        marked_paragraphs = _mark_name_introductions(marked_paragraphs)
+    text = "\n\n".join(marked_paragraphs)
+    if not text.strip():
+        raise ValueError("No readable paragraphs were found in this PDF.")
+    return text
+
+
+def pdf_title(path):
+    metadata = _pdf_reader(path).metadata
+    return str(metadata.title).strip() if metadata and metadata.title else None
+
+
+def pdf_author(path):
+    metadata = _pdf_reader(path).metadata
+    return str(metadata.author).strip() if metadata and metadata.author else None
+
+
 CONVERTERS = {
     ".epub": epub_to_text,
+    ".pdf": pdf_to_text,
 }
 
 TITLE_READERS = {
     ".epub": epub_title,
+    ".pdf": pdf_title,
 }
 
 AUTHOR_READERS = {
     ".epub": epub_author,
+    ".pdf": pdf_author,
 }
 
 

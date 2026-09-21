@@ -2,3 +2,4 @@ EbookLib==0.20
 beautifulsoup4==4.15.0
 lxml==6.1.1
 PySide6==6.11.1
+pypdf>=5.0
