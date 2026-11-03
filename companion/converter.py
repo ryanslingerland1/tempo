@@ -7,6 +7,7 @@ separated, matching what bookmanager.load_book parses.
 import argparse
 from collections import Counter
 import re
+import sys
 from pathlib import Path
 
 import ebooklib
@@ -419,6 +420,64 @@ AUTHOR_READERS = {
 }
 
 
+def _text_complexity_reasons(text):
+    """Conservative hints, not an academic-paper classifier.
+
+    Require paired section headings or repeated citations so a novel that
+    mentions research or has a bibliography alone does not raise a warning.
+    """
+    headings = {
+        re.sub(r"^\d+[.\s]+", "", line.strip()).lower().strip(" :.")
+        for line in text.splitlines() if len(line.strip()) <= 60
+    }
+    reasons = []
+    if "abstract" in headings and headings.intersection({"references", "bibliography", "works cited"}):
+        reasons.append("An abstract and a references section suggest a research paper.")
+    numeric = re.findall(r"\[\d+(?:\s*[,–-]\s*\d+)*\]", text)
+    author_year = re.findall(r"\([A-Z][^()\n]{1,60},?\s+(?:19|20)\d{2}[a-z]?\)", text)
+    if len(numeric) + len(author_year) >= 8:
+        reasons.append("Repeated citation markers may interrupt word-by-word reading.")
+    return reasons
+
+
+def document_complexity_reasons(path):
+    """Inspect the source before front-matter removal or text flattening.
+
+    PDF text signals cannot reliably identify columns or image-only formulas.
+    No warning means no known signals were found, not guaranteed fidelity.
+    """
+    path = Path(path)
+    if path.suffix.lower() == ".pdf":
+        reader = _pdf_reader(path)
+        text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        return _text_complexity_reasons(text)
+    if path.suffix.lower() != ".epub":
+        return []
+    book = _read_epub(path)
+    texts = []
+    tables = equations = notes = 0
+    for idref, linear in book.spine:
+        item = book.get_item_with_id(idref)
+        if linear == "no" or item is None or item.get_type() != ebooklib.ITEM_DOCUMENT or isinstance(item, epub.EpubNav):
+            continue
+        soup = BeautifulSoup(item.get_content(), "xml")
+        texts.append(soup.get_text(separator="\n"))
+        tables += len(soup.find_all("table"))
+        equations += len(soup.find_all("math"))
+        for tag in soup.find_all(True):
+            semantic = str(tag.get("epub:type", "")).split() + str(tag.get("role", "")).split()
+            if set(semantic).intersection({"noteref", "doc-noteref"}):
+                notes += 1
+    reasons = _text_complexity_reasons("\n".join(texts))
+    if tables:
+        reasons.append("Tables were found; their row and column layout will not be preserved.")
+    if equations:
+        reasons.append("Mathematical notation was found; equations may lose meaning in plain text.")
+    if notes >= 5:
+        reasons.append("Frequent footnote or endnote links may interrupt the reading flow.")
+    return reasons
+
+
 def suggest_title(path):
     path = Path(path)
     reader = TITLE_READERS.get(path.suffix.lower())
@@ -531,6 +590,12 @@ def main():
     parser.add_argument("--author", help="Author to embed, so a future sort feature can use it")
     parser.set_defaults(skip_front_matter=True, mark_name_introductions=True)
     args = parser.parse_args()
+    reasons = document_complexity_reasons(args.input)
+    if reasons:
+        print("Warning: this document may not read well in Tempo's plain-text, word-by-word format.", file=sys.stderr)
+        for reason in reasons:
+            print(f"  - {reason}", file=sys.stderr)
+        print("Check the converted text against the original before reading.", file=sys.stderr)
     convert(
         args.input,
         args.output,

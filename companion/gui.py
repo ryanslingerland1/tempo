@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from converter import CONVERTERS, convert, peek_meta, strip_meta_header, suggest_author, suggest_title
+from converter import CONVERTERS, convert, document_complexity_reasons, peek_meta, strip_meta_header, suggest_author, suggest_title
 
 PICO_BOOKS_DIR = Path(__file__).resolve().parent.parent / "pico" / "books"
 STYLE_PATH = Path(__file__).resolve().parent / "style.qss"
@@ -327,6 +327,19 @@ class MainWindow(QWidget):
                 return
 
         try:
+            reasons = document_complexity_reasons(self.source_path)
+            if reasons:
+                answer = QMessageBox.warning(
+                    self,
+                    "This document may not read well in Tempo",
+                    "Tempo uses plain text and displays words one at a time.\n\n"
+                    + "\n".join(f"• {reason}" for reason in reasons)
+                    + "\n\nCheck the converted text against the original before reading. Convert anyway?",
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+                if answer != QMessageBox.StandardButton.Yes:
+                    return
             self.destination_folder.mkdir(parents=True, exist_ok=True)
             text = convert(
                 self.source_path,
