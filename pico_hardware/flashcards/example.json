@@ -1,0 +1,8 @@
+{
+  "title": "RSVP Basics",
+  "cards": [
+    {"front": "What does RSVP stand for?", "back": "Rapid Serial Visual Presentation."},
+    {"front": "What does WPM measure?", "back": "Words per minute."},
+    {"front": "What happens when you know a flashcard?", "back": "It is removed from the current pile."}
+  ]
+}

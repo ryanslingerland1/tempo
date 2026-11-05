@@ -1,0 +1,1181 @@
+"""Mac prototype for the three-button Pico RSVP reader.
+
+Keyboard controls mirror the physical buttons: Left/A, Space/Enter/S, and
+Right/D. Hold a key or the matching on-screen button for the hold actions.
+"""
+
+import tkinter as tk
+from tkinter import font as tkfont
+from pathlib import Path
+
+from bookmanager import (
+    book_word_count,
+    load_book,
+    load_cards,
+    load_flashcard_session,
+    load_flashcard_metrics,
+    load_last_read,
+    load_progress,
+    load_settings,
+    load_stats,
+    peek_book_meta,
+    record_flashcard_result,
+    reset_flashcard_session,
+    save_progress,
+    save_flashcard_session,
+    save_settings,
+    save_stats,
+)
+from reader import RSVPReader
+
+
+ROOT = Path(__file__).parent
+TOP_LEVEL_MENU_ITEMS = (
+    ("Books", ROOT / "books"),
+    ("Flashcards", ROOT / "flashcards"),
+    ("Stats", None),
+    ("Settings", None),
+)
+# Sentinel used as the "path" of the sort-order row in a book listing — not
+# a real Path, so every place that unpacks (name, path) from menu_items must
+# check for it before calling Path-only methods like is_dir().
+SORT_TOGGLE_PATH = "__sort__"
+BOOK_SORT_LABELS = {
+    "author": "Sort: Author A-Z",
+    "title": "Sort: Title A-Z",
+    "recent": "Sort: Recently Read",
+}
+HOLD_MS = 500
+REPEAT_MS = 200
+SEEK_INITIAL_REPEAT_MS = 350
+SEEK_MIN_REPEAT_MS = 80
+SEEK_ACCELERATION_MS = 15
+
+THEMES = (
+    {"name": "Classic", "bg": "#f7f4ed", "fg": "#202020", "accent": "#c02a2a"},
+    {"name": "Night", "bg": "#1d2025", "fg": "#e8edf2", "accent": "#75c7ff"},
+    {"name": "Sepia", "bg": "#eee0c0", "fg": "#4a3520", "accent": "#8b3f22"},
+    {"name": "Focus", "bg": "#101010", "fg": "#f5f5f5", "accent": "#f2c94c", "single_word": True},
+    {"name": "ORP", "bg": "#f7f7f7", "fg": "#202020", "accent": "#d62f2f", "single_word": True, "orp": True},
+    {"name": "ORP Night", "bg": "#000000", "fg": "#ffffff", "accent": "#ff4b4b", "single_word": True, "orp": True},
+)
+
+SETTING_SPECS = (
+    {
+        "key": "chapter_auto_pause",
+        "label": "Pause at chapters",
+        "options": (True, False),
+        "format": lambda value: "On" if value else "Off",
+    },
+    {
+        "key": "default_wpm",
+        "label": "Default speed",
+        "options": (150, 200, 250, 300, 350, 400, 450, 500),
+        "format": lambda value: f"{value} WPM",
+    },
+    {
+        "key": "default_theme",
+        "label": "Default theme",
+        "options": tuple(theme["name"] for theme in THEMES),
+        "format": lambda value: value,
+    },
+    {
+        "key": "sleep_timer",
+        "label": "Sleep timer",
+        "options": (0, 15, 30, 45, 60, 90),
+        "format": lambda value: "Off" if value == 0 else f"{value} min",
+    },
+    {
+        "key": "font_family",
+        "label": "Font",
+        "options": ("Courier", "Helvetica", "Georgia", "Menlo"),
+        "format": lambda value: value,
+    },
+    {
+        "key": "progress_display",
+        "label": "Progress shown as",
+        "options": ("words", "percent"),
+        "format": lambda value: "Words" if value == "words" else "Percent",
+    },
+)
+
+
+class TempoApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Tempo RSVP Reader")
+        self.root.geometry("428x142")
+        self.root.minsize(428, 142)
+
+        self.did_hold = {
+            "left": False,
+            "center": False,
+            "right": False,
+        }
+        self.theme_index = 0
+        self.settings = load_settings()
+        self.settings_index = 0
+        self.book_sort_mode = self.settings.get("book_sort_mode", "recent")
+        self.screen = "menu"
+        self.menu_items = []
+        self.menu_index = 0
+        self.menu_path = None
+        self.reader = None
+        self.book_path = None
+        self.book_title = None
+        self.book_author = None
+        self.chapters = []
+        self.chapter_titles_by_position = {}
+        self.chapter_book_path = None
+        self.chapter_items = []
+        self.chapter_index = 0
+        self.pending_words_read = 0
+        self.pending_seconds_read = 0.0
+        self.last_scheduled_delay = 0.0
+        self.sleep_timer_job = None
+        self.cards = []
+        self.card_index = 0
+        self.card_flipped = False
+        self.card_deck_path = None
+        self.card_total_cards = 0
+        self.deck_action_path = None
+        self.deck_action_index = 0
+        self.held = {"left": False, "center": False, "right": False}
+        self.hold_jobs = {}
+        self.repeat_jobs = {}
+        self.pending_release_jobs = {}
+        self.seek_repeat_count = {"left": 0, "right": 0}
+        self.read_job = None
+        self.pending_center_tap = None
+        self.scrolling_preview = False
+
+        self.title_label = tk.Label(root, font=("Helvetica", 16, "bold"))
+        self.content = tk.Frame(root)
+        self.status = tk.Label(root, font=("Helvetica", 12))
+        self.controls = tk.Frame(root)
+        self.set_chrome_visible(title=True, status=True)
+
+        controls = self.controls
+        self.buttons = {}
+        # for name, text in (("left", "LEFT"), ("center", "CENTER"), ("right", "RIGHT")):
+        #     button = tk.Button(controls, text=text, width=16, height=2)
+        #     button.pack(side="left", padx=8)
+        #     button.bind("<ButtonPress-1>", lambda event, key=name: self.press(key))
+        #     button.bind("<ButtonRelease-1>", lambda event, key=name: self.release(key))
+        #     self.buttons[name] = button
+
+        self.bind_keys()
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self.show_menu()
+
+    def set_chrome_visible(self, title, status):
+        # pack_forget() followed by a later pack() re-adds a widget at the
+        # END of the packing order rather than its old spot, which silently
+        # breaks the top-to-bottom layout. Always unpack everything and
+        # rebuild the order from scratch so it's never order-dependent.
+        for widget in (self.title_label, self.content, self.status, self.controls):
+            widget.pack_forget()
+        if title:
+            self.title_label.pack(pady=(20, 4))
+        self.content.pack(expand=True, fill="both", padx=30)
+        if status:
+            self.status.pack(pady=6)
+        # The desktop prototype is keyboard-driven until physical buttons are
+        # connected. Do not reserve screen space for an empty button frame.
+        if getattr(self, "buttons", {}):
+            self.controls.pack(pady=(0, 20))
+
+    def bind_keys(self):
+        bindings = {"left": ("<Left>", "<a>", "<A>"), "center": ("<space>", "<Return>", "<s>", "<S>"), "right": ("<Right>", "<d>", "<D>")}
+        for name, keys in bindings.items():
+            for key in keys:
+                self.root.bind(key, lambda event, name=name: self.key_press(name))
+                self.root.bind(key.replace("<", "<KeyRelease-"), lambda event, name=name: self.key_release(name))
+
+    def key_press(self, button):
+        # The OS auto-repeats a held key as rapid fake release/press pairs.
+        # If a release is still pending when the next press arrives, it's
+        # just repeat noise for the same hold, not a real release.
+        pending = self.pending_release_jobs.pop(button, None)
+        if pending:
+            self.root.after_cancel(pending)
+            return "break"
+        if not self.held[button]:
+            self.press(button)
+        return "break"
+
+    def key_release(self, button):
+        self.pending_release_jobs[button] = self.root.after(20, lambda: self.finish_release(button))
+        return "break"
+
+    def finish_release(self, button):
+        self.pending_release_jobs.pop(button, None)
+        self.release(button)
+
+    def press(self, button):
+        if self.held[button]:
+            return
+
+        self.held[button] = True
+        if button in self.seek_repeat_count:
+            self.seek_repeat_count[button] = 0
+        self.hold_jobs[button] = self.root.after(HOLD_MS, lambda: self.start_hold(button))
+
+    def release(self, button):
+        if not self.held[button]:
+            return
+        self.held[button] = False
+        job = self.hold_jobs.pop(button, None)
+
+        if job:
+            self.root.after_cancel(job)
+
+        # Only perform a tap if a hold never happened
+        if not self.did_hold[button]:
+            self.tap(button)
+
+        self.did_hold[button] = False
+        if job := self.repeat_jobs.pop(button, None):
+            self.root.after_cancel(job)
+        if button in self.seek_repeat_count:
+            self.seek_repeat_count[button] = 0
+        if button in ("left", "right") and self.scrolling_preview:
+            self.scrolling_preview = False
+            self.render_reading()
+
+    def start_hold(self, button):
+        self.hold_jobs.pop(button, None)
+
+        if self.held[button]:
+            self.did_hold[button] = True
+            self.hold(button)
+
+    def repeat(self, button):
+        if self.held[button]:
+            self.hold(button)
+
+    def tap(self, button):
+        if self.screen == "menu":
+            if button == "left":
+                self.move_menu(-1)
+            elif button == "right":
+                self.move_menu(1)
+            elif self.selected_menu_book_path() or self.selected_menu_flashcard_path():
+                self.menu_center_tap()
+            else:
+                self.select_menu()
+        elif self.screen == "chapters":
+            if button == "left":
+                self.move_chapters(-1)
+            elif button == "right":
+                self.move_chapters(1)
+            else:
+                self.select_chapter()
+        elif self.screen == "deck_actions":
+            if button == "left":
+                self.move_deck_actions(-1)
+            elif button == "right":
+                self.move_deck_actions(1)
+            else:
+                self.select_deck_action()
+        elif self.screen == "deck_reset_confirm":
+            if button == "left":
+                self.move_deck_actions(-1)
+            elif button == "right":
+                self.move_deck_actions(1)
+            else:
+                self.select_deck_reset_confirmation()
+        elif self.screen == "settings":
+            if button == "left":
+                self.move_settings(-1)
+            elif button == "right":
+                self.move_settings(1)
+            else:
+                self.select_setting()
+        elif self.screen == "stats":
+            self.screen = "menu"
+            self.render_menu()
+        elif self.screen == "read":
+            if self.reader.running:
+                if button == "left":
+                    self.reader.decrease_speed()
+                elif button == "right":
+                    self.reader.increase_speed()
+                else:
+                    self.pause_reading()
+            else:
+                if button == "left":
+                    self.reader.decrease_speed()
+                elif button == "right":
+                    self.reader.increase_speed()
+                else:
+                    self.paused_center_tap()
+                self.render_reading()
+        elif self.screen == "cards":
+            if button == "left":
+                self.next_card(known=False)
+            elif button == "right":
+                self.next_card(known=True)
+            else:
+                self.card_flipped = not self.card_flipped
+                self.render_card()
+
+    def hold(self, button):
+        if button == "center" and self.pending_center_tap:
+            self.root.after_cancel(self.pending_center_tap)
+            self.pending_center_tap = None
+        if self.screen == "menu" and button == "center":
+            self.root.destroy()
+            return
+        if self.screen == "chapters" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen in ("deck_actions", "deck_reset_confirm") and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen == "settings" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen == "stats" and button == "center":
+            self.screen = "menu"
+            self.render_menu()
+            return
+        if self.screen == "read":
+            if self.reader.running:
+                return
+            if button == "center" and not self.reader.running:
+                self.return_to_menu()
+                return
+            if button == "left":
+                self.reader.move(-10)
+            elif button == "right":
+                self.reader.move(10)
+            if button in ("left", "right") and not self.reader.running:
+                self.scrolling_preview = True
+            self.render_reading()
+        elif self.screen == "cards" and button == "center":
+            self.return_to_menu()
+            return
+        if self.held[button]:
+            interval = REPEAT_MS
+            if self.screen == "read" and not self.reader.running and button in self.seek_repeat_count:
+                interval = max(
+                    SEEK_MIN_REPEAT_MS,
+                    SEEK_INITIAL_REPEAT_MS - self.seek_repeat_count[button] * SEEK_ACCELERATION_MS,
+                )
+                self.seek_repeat_count[button] += 1
+            self.repeat_jobs[button] = self.root.after(interval, lambda: self.repeat(button))
+
+    def clear_content(self):
+        for widget in self.content.winfo_children():
+            widget.destroy()
+
+    def show_menu(self):
+        self.stop_reading()
+        self.screen = "menu"
+        self.menu_path = None
+        self.menu_items = TOP_LEVEL_MENU_ITEMS
+        self.menu_index = 0
+        self.render_menu()
+
+    def render_scrolling_list(self, count, selected_index, label_for):
+        """Render a vertically-centered, auto-scrolling window of labels —
+        shared by the book/flashcard menu and the chapter-jump list, since
+        both need the same "show what fits, scroll to keep selection
+        visible" behavior on this tiny, fixed-size screen. Returns the
+        Label for the selected row so the caller can highlight it — that
+        has to happen after apply_theme(), which would otherwise overwrite
+        any color set here.
+        """
+        menu_font = ("Helvetica", 18)
+        row_pady = 2
+        self.root.update_idletasks()
+        available_height = self.content.winfo_height()
+        if available_height <= 1:
+            available_height = 110
+        row_height = tkfont.Font(font=menu_font).metrics("linespace") + 2 * row_pady
+        visible_count = max(1, available_height // row_height)
+
+        if count <= visible_count:
+            start = 0
+        else:
+            start = min(max(0, selected_index - visible_count // 2), count - visible_count)
+
+        selected_label = None
+        for offset in range(min(visible_count, count - start)):
+            index = start + offset
+            prefix = "› " if index == selected_index else "  "
+            label = tk.Label(self.content, text=prefix + label_for(index), anchor="w", font=menu_font)
+            label.pack(fill="x", pady=row_pady)
+            if index == selected_index:
+                selected_label = label
+        return selected_label
+
+    def render_menu(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        is_book_listing = self.menu_path is not None and self.menu_path.is_relative_to(ROOT / "books")
+        if is_book_listing:
+            self.render_book_list()
+        else:
+            selected = self.render_scrolling_list(
+                len(self.menu_items), self.menu_index, lambda i: self.menu_items[i][0]
+            )
+            self.apply_theme()
+            if selected:
+                selected.config(fg="red")
+
+    def render_book_list(self):
+        menu_font = ("Helvetica", 18)
+        row_pady = 2
+        self.root.update_idletasks()
+        available_height = self.content.winfo_height()
+        if available_height <= 1:
+            available_height = 110
+        row_height = tkfont.Font(font=menu_font).metrics("linespace") + 2 * row_pady
+        visible_count = max(1, available_height // row_height)
+
+        count = len(self.menu_items)
+        if count <= visible_count:
+            start = 0
+        else:
+            start = min(max(0, self.menu_index - visible_count // 2), count - visible_count)
+
+        theme = THEMES[self.theme_index]
+        selected_label = None
+        bar_width, bar_height = 46, 8
+        for offset in range(min(visible_count, count - start)):
+            index = start + offset
+            name, path = self.menu_items[index]
+            prefix = "› " if index == self.menu_index else "  "
+
+            row = tk.Frame(self.content)
+            row.pack(fill="x", pady=row_pady)
+            label = tk.Label(row, text=prefix + name, anchor="w", font=menu_font)
+            label.pack(side="left", fill="x", expand=True)
+            if index == self.menu_index:
+                selected_label = label
+
+            if isinstance(path, Path) and not path.is_dir():
+                canvas = tk.Canvas(row, width=bar_width, height=bar_height, highlightthickness=0, bd=0)
+                canvas.pack(side="right", padx=(8, 4))
+                self.draw_pill(canvas, 0, 0, bar_width, bar_height, "#8a8a8a")
+                fraction = self.book_progress_fraction(path)
+                if fraction > 0:
+                    fill_width = max(bar_height, bar_width * fraction)
+                    self.draw_pill(canvas, 0, 0, fill_width, bar_height, theme["accent"])
+
+        self.apply_theme()
+        if selected_label:
+            selected_label.config(fg="red")
+
+    def move_menu(self, amount):
+        self.menu_index = (self.menu_index + amount) % len(self.menu_items)
+        self.render_menu()
+
+    def select_menu(self):
+        name, path = self.menu_items[self.menu_index]
+        if name == "← Back":
+            if self.menu_path in (ROOT / "books", ROOT / "flashcards"):
+                self.menu_path = None
+                self.menu_items = TOP_LEVEL_MENU_ITEMS
+            else:
+                self.open_menu_folder(path)
+            self.menu_index = 0
+            self.render_menu()
+        elif path == SORT_TOGGLE_PATH:
+            self.cycle_book_sort()
+        elif name == "Settings":
+            self.show_settings()
+        elif name == "Stats":
+            self.show_stats()
+        elif path.is_dir():
+            self.open_menu_folder(path)
+        elif (ROOT / "books") in path.parents:
+            self.start_book(path)
+        else:
+            self.start_cards(path)
+
+    def selected_menu_book_path(self):
+        """The path of the currently highlighted menu row, if (and only if)
+        it's an actual book file — not a folder, "Back", the sort toggle,
+        or a flashcard deck.
+        """
+        if not self.menu_items:
+            return None
+        name, path = self.menu_items[self.menu_index]
+        if name == "← Back" or not isinstance(path, Path) or path.is_dir():
+            return None
+        if (ROOT / "books") in path.parents:
+            return path
+        return None
+
+    def selected_menu_flashcard_path(self):
+        """Return the selected deck path only when a JSON flashcard deck is selected."""
+        if not self.menu_items:
+            return None
+        name, path = self.menu_items[self.menu_index]
+        if name == "← Back" or not isinstance(path, Path) or path.is_dir():
+            return None
+        if (ROOT / "flashcards") in path.parents:
+            return path
+        return None
+
+    def menu_center_tap(self):
+        """A second Center tap opens actions for the selected book or deck."""
+        if self.pending_center_tap:
+            self.root.after_cancel(self.pending_center_tap)
+            self.pending_center_tap = None
+            book_path = self.selected_menu_book_path()
+            deck_path = self.selected_menu_flashcard_path()
+            if book_path:
+                self.show_chapters(book_path)
+            elif deck_path:
+                self.show_deck_actions(deck_path)
+            return
+        self.pending_center_tap = self.root.after(300, self.menu_single_tap)
+
+    def menu_single_tap(self):
+        self.pending_center_tap = None
+        if self.screen == "menu":
+            self.select_menu()
+
+    def show_chapters(self, path):
+        _words, _title, _author, _paragraph_ends, chapters = load_book(path)
+        if not chapters:
+            return
+        self.chapter_book_path = path
+        self.chapter_items = [(None, "← Back")] + chapters
+        self.chapter_index = 0
+        self.screen = "chapters"
+        self.render_chapters()
+
+    def render_chapters(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        selected = self.render_scrolling_list(
+            len(self.chapter_items), self.chapter_index, lambda i: self.chapter_items[i][1]
+        )
+        self.apply_theme()
+        if selected:
+            selected.config(fg="red")
+
+    def move_chapters(self, amount):
+        self.chapter_index = (self.chapter_index + amount) % len(self.chapter_items)
+        self.render_chapters()
+
+    def select_chapter(self):
+        word_index, _title = self.chapter_items[self.chapter_index]
+        if word_index is None:
+            self.screen = "menu"
+            self.render_menu()
+            return
+        self.start_book(self.chapter_book_path, start_position=word_index)
+
+    def deck_action_rows(self):
+        if self.screen == "deck_reset_confirm":
+            return ("Cancel", "Reset deck")
+        return ("Resume deck", "Reset deck", "← Back")
+
+    def show_deck_actions(self, path):
+        self.deck_action_path = path
+        self.deck_action_index = 0
+        self.screen = "deck_actions"
+        self.render_deck_actions("Deck actions")
+
+    def render_deck_actions(self, heading):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        tk.Label(self.content, text=heading, font=("Helvetica", 15, "bold")).pack(pady=(2, 8))
+        if self.screen == "deck_actions":
+            deck_cards, _title = load_cards(self.deck_action_path)
+            metrics = load_flashcard_metrics(self.deck_action_path, default_total=len(deck_cards))
+            success_rate = metrics["mastered"] * 100 // metrics["total"] if metrics["total"] else 0
+            tk.Label(
+                self.content,
+                text=(
+                    f"Mastered: {metrics['mastered']}/{metrics['total']}"
+                    f"  •  Left: {metrics['remaining']}  •  {success_rate}%"
+                ),
+                font=("Helvetica", 10),
+            ).pack(pady=(0, 3))
+        rows = self.deck_action_rows()
+        selected = self.render_scrolling_list(len(rows), self.deck_action_index, lambda i: rows[i])
+        self.apply_theme()
+        if selected:
+            selected.config(fg="red")
+
+    def move_deck_actions(self, amount):
+        self.deck_action_index = (self.deck_action_index + amount) % len(self.deck_action_rows())
+        heading = "Reset this deck?" if self.screen == "deck_reset_confirm" else "Deck actions"
+        self.render_deck_actions(heading)
+
+    def select_deck_action(self):
+        action = self.deck_action_rows()[self.deck_action_index]
+        if action == "Resume deck":
+            self.start_cards(self.deck_action_path)
+        elif action == "Reset deck":
+            self.deck_action_index = 0
+            self.screen = "deck_reset_confirm"
+            self.render_deck_actions("Reset this deck?")
+        else:
+            self.screen = "menu"
+            self.render_menu()
+
+    def select_deck_reset_confirmation(self):
+        if self.deck_action_rows()[self.deck_action_index] == "Reset deck":
+            reset_flashcard_session(self.deck_action_path)
+            self.start_cards(self.deck_action_path)
+        else:
+            self.deck_action_index = 0
+            self.screen = "deck_actions"
+            self.render_deck_actions("Deck actions")
+
+    def show_settings(self):
+        self.settings_index = 0
+        self.screen = "settings"
+        self.render_settings()
+
+    def settings_row_label(self, index):
+        if index == 0:
+            return "← Back"
+        spec = SETTING_SPECS[index - 1]
+        value = self.settings.get(spec["key"], spec["options"][0])
+        return f"{spec['label']}: {spec['format'](value)}"
+
+    def render_settings(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        selected = self.render_scrolling_list(
+            len(SETTING_SPECS) + 1, self.settings_index, self.settings_row_label
+        )
+        self.apply_theme()
+        if selected:
+            selected.config(fg="red")
+
+    def move_settings(self, amount):
+        self.settings_index = (self.settings_index + amount) % (len(SETTING_SPECS) + 1)
+        self.render_settings()
+
+    def select_setting(self):
+        if self.settings_index == 0:
+            self.screen = "menu"
+            self.render_menu()
+            return
+        spec = SETTING_SPECS[self.settings_index - 1]
+        options = spec["options"]
+        current = self.settings.get(spec["key"], options[0])
+        current_option_index = options.index(current) if current in options else 0
+        self.settings[spec["key"]] = options[(current_option_index + 1) % len(options)]
+        save_settings(self.settings)
+        self.render_settings()
+
+    def show_stats(self):
+        self.screen = "stats"
+        self.render_stats()
+
+    def render_stats(self):
+        self.clear_content()
+        self.set_chrome_visible(title=False, status=False)
+        stats = load_stats()
+        total_words = stats.get("total_words_read", 0) + self.pending_words_read
+        total_hours = (stats.get("total_seconds_read", 0) + self.pending_seconds_read) / 3600
+        cards_reviewed = stats.get("flashcards_reviewed", 0)
+
+        tk.Label(self.content, text="Stats", font=("Helvetica", 15, "bold")).pack(pady=(2, 5))
+        tk.Label(
+            self.content,
+            text=f"Reading: {total_hours:.1f} h  •  {total_words:,} words",
+            font=("Helvetica", 12),
+        ).pack(pady=1)
+        tk.Label(self.content, text=f"Flashcards reviewed: {cards_reviewed:,}", font=("Helvetica", 12)).pack(pady=1)
+        tk.Label(self.content, text="Center: back", font=("Helvetica", 9)).pack(pady=(4, 0))
+        self.apply_theme()
+
+    def open_menu_folder(self, path, keep_index=False):
+        self.menu_path = path
+        entries = [("← Back", path.parent)]
+        is_books = path.is_relative_to(ROOT / "books")
+        if is_books:
+            entries.append((BOOK_SORT_LABELS[self.book_sort_mode], SORT_TOGGLE_PATH))
+        entries.extend((f"📁 {entry.name}", entry) for entry in sorted(path.iterdir()) if entry.is_dir())
+        pattern = "*.txt" if is_books else "*.json"
+        book_files = list(path.glob(pattern))
+        if is_books:
+            entries.extend(self.sorted_book_entries(book_files))
+        else:
+            entries.extend((entry.stem.replace("_", " ").title(), entry) for entry in sorted(book_files))
+        self.menu_items = entries
+        if not keep_index:
+            self.menu_index = 0
+        self.render_menu()
+
+    def sorted_book_entries(self, book_files):
+        books = []
+        for entry_path in book_files:
+            title, author = peek_book_meta(entry_path)
+            last_read = load_last_read(entry_path.name) if self.book_sort_mode == "recent" else 0
+            books.append((entry_path, title, author, last_read))
+
+        if self.book_sort_mode == "recent":
+            books.sort(key=lambda book: -book[3])
+        elif self.book_sort_mode == "author":
+            books.sort(key=lambda book: (book[2] is None, (book[2] or "").lower(), book[1].lower()))
+        else:  # "title"
+            books.sort(key=lambda book: book[1].lower())
+
+        return [(title, entry_path) for entry_path, title, _author, _last_read in books]
+
+    def cycle_book_sort(self):
+        modes = list(BOOK_SORT_LABELS)
+        next_index = (modes.index(self.book_sort_mode) + 1) % len(modes)
+        self.book_sort_mode = modes[next_index]
+        self.settings["book_sort_mode"] = self.book_sort_mode
+        save_settings(self.settings)
+        self.open_menu_folder(self.menu_path, keep_index=True)
+
+    def book_progress_fraction(self, path):
+        position, _wpm, _theme = load_progress(path.name)
+        total = book_word_count(path)
+        return position / total if total else 0
+
+    def draw_pill(self, canvas, x0, y0, x1, y1, color):
+        height = y1 - y0
+        radius = height / 2
+        if x1 - x0 < height:
+            x1 = x0 + height
+        canvas.create_oval(x0, y0, x0 + height, y1, fill=color, outline=color)
+        canvas.create_oval(x1 - height, y0, x1, y1, fill=color, outline=color)
+        if x1 - radius > x0 + radius:
+            canvas.create_rectangle(x0 + radius, y0, x1 - radius, y1, fill=color, outline=color)
+
+    def start_book(self, path, start_position=None):
+        words, title, author, paragraph_ends, chapters = load_book(path)
+        default_wpm = self.settings.get("default_wpm", 300)
+        position, wpm, saved_theme = load_progress(path.name, default_wpm=default_wpm)
+        if start_position is not None:
+            position = start_position
+        theme_name = saved_theme or self.settings.get("default_theme", THEMES[0]["name"])
+        self.theme_index = next(
+            (index for index, theme in enumerate(THEMES) if theme["name"] == theme_name), 0
+        )
+        self.reader = RSVPReader(words, wpm=wpm, position=position, paragraph_ends=paragraph_ends)
+        self.chapters = chapters
+        self.chapter_titles_by_position = dict(chapters)
+        self.book_path = path
+        self.book_title = title
+        self.book_author = author
+        self.screen = "read"
+        self.set_chrome_visible(title=False, status=True)
+        self.render_reading()
+        self.status.config(
+            text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+            f"  •  {self.progress_text()}  •  Center: start"
+        )
+        self.schedule_sleep_timer()
+
+    def schedule_sleep_timer(self):
+        self.cancel_sleep_timer()
+        minutes = self.settings.get("sleep_timer", 0)
+        if minutes:
+            self.sleep_timer_job = self.root.after(minutes * 60 * 1000, self.sleep_timer_fired)
+
+    def cancel_sleep_timer(self):
+        if self.sleep_timer_job:
+            self.root.after_cancel(self.sleep_timer_job)
+            self.sleep_timer_job = None
+
+    def sleep_timer_fired(self):
+        self.sleep_timer_job = None
+        self.close()
+
+    def render_reading(self):
+        self.clear_content()
+        center = self.reader.position
+        row = tk.Frame(self.content)
+        row.pack(expand=True, fill="both")
+        theme = THEMES[self.theme_index]
+        self.root.update_idletasks()
+        row_width = row.winfo_width()
+        if row_width <= 1:
+            row_width = self.content.winfo_width()
+        if row_width <= 1:
+            row_width = 700
+        margin = 24
+        gap = 20
+        font_family = self.settings.get("font_family", "Courier")
+        focus_font = (font_family, 26, "bold")
+        context_font = (font_family, 16, "normal")
+        focus_word = self.reader.words[center]
+        focus_width = tkfont.Font(font=focus_font).measure(focus_word)
+
+        if self.scrolling_preview:
+            # Match normal reading's fonts (bold focus word, smaller context
+            # words) instead of a third, different preview-only font size.
+            focus_measure = tkfont.Font(font=focus_font)
+            context_measure = tkfont.Font(font=context_font)
+            space_width = context_measure.measure(" ")
+
+            def preview_width(words, focus_offset):
+                widths = [
+                    (focus_measure if i == focus_offset else context_measure).measure(word)
+                    for i, word in enumerate(words)
+                ]
+                return sum(widths) + space_width * (len(words) - 1)
+
+            available_width = row_width - 48
+            preview = [focus_word]
+            preview_start = center
+            for radius in range(4, 0, -1):
+                start = max(0, center - radius)
+                end = min(len(self.reader.words), center + radius + 1)
+                candidate = self.reader.words[start:end]
+                if preview_width(candidate, center - start) <= available_width:
+                    preview = candidate
+                    preview_start = start
+                    break
+
+            focus_offset = center - preview_start
+            x = (row_width - preview_width(preview, focus_offset)) / 2
+            highlight_label = None
+            for index, word in enumerate(preview):
+                is_focus = index == focus_offset
+                font = focus_font if is_focus else context_font
+                measure = focus_measure if is_focus else context_measure
+                label = tk.Label(row, text=word, font=font)
+                label.place(x=x, rely=0.5, anchor="w")
+                if is_focus:
+                    highlight_label = label
+                x += measure.measure(word) + space_width
+            self.status.config(text=f"Seeking  •  {self.progress_text()}")
+            self.apply_theme()
+            highlight_label.config(fg=theme["accent"])
+            return
+
+        # RSVP works best with one focal word. Add immediate context only when
+        # it can sit beside the focal word without crowding or clipping.
+        display = [(0, focus_word, focus_font, row_width / 2)]
+        if not theme.get("single_word") and 0 < center < len(self.reader.words) - 1:
+            left_word = self.reader.words[center - 1]
+            right_word = self.reader.words[center + 1]
+            context_measure = tkfont.Font(font=context_font)
+            left_width = context_measure.measure(left_word)
+            right_width = context_measure.measure(right_word)
+            left_x = row_width / 2 - focus_width / 2 - gap - left_width / 2
+            right_x = row_width / 2 + focus_width / 2 + gap + right_width / 2
+            if left_x - left_width / 2 >= margin and right_x + right_width / 2 <= row_width - margin:
+                display = [
+                    (-1, left_word, context_font, left_x),
+                    (0, focus_word, focus_font, row_width / 2),
+                    (1, right_word, context_font, right_x),
+                ]
+        focus_label = None
+        for offset, word, font, x in display:
+            if offset == 0 and theme.get("orp"):
+                marker_index = self.orp_index(word)
+                before, marker, after = word[:marker_index], word[marker_index], word[marker_index + 1:]
+                font_measure = tkfont.Font(font=font)
+                marker_width = font_measure.measure(marker)
+                tk.Label(row, text=before, font=font).place(
+                    x=x - marker_width / 2, rely=0.5, anchor="e"
+                )
+                label = tk.Label(row, text=marker, font=font)
+                label.place(x=x, rely=0.5, anchor="center")
+                tk.Label(row, text=after, font=font).place(
+                    x=x + marker_width / 2, rely=0.5, anchor="w"
+                )
+            else:
+                label = tk.Label(row, text=word, font=font)
+                label.place(x=x, rely=0.5, anchor="center")
+            if offset == 0:
+                label.config(fg=theme["accent"])
+                focus_label = label
+        state = "Reading" if self.reader.running else "Paused"
+        self.status.config(
+            text=f"{state}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})  •  {self.progress_text()}"
+        )
+        self.apply_theme()
+        focus_label.config(fg=theme["accent"])
+
+    def progress_text(self):
+        total = len(self.reader.words)
+        position = self.reader.position + 1
+        if self.settings.get("progress_display", "words") == "percent":
+            progress = f"{position * 100 // total}%"
+        else:
+            progress = f"{position}/{total}"
+        chapter = self.chapter_position_text()
+        if chapter:
+            return f"Ch {chapter}  •  {progress}"
+        return progress
+
+    def chapter_position_text(self):
+        if not self.chapters:
+            return None
+        current = 0
+        for index, (word_index, _title) in enumerate(self.chapters):
+            if word_index > self.reader.position:
+                break
+            current = index + 1
+        return f"{current}/{len(self.chapters)}"
+
+    def remaining_time_text(self):
+        words_remaining = len(self.reader.words) - self.reader.position
+        seconds = (words_remaining * 60 + self.reader.wpm - 1) // self.reader.wpm
+        if seconds < 60:
+            return "<1 min left"
+        minutes, seconds = divmod(seconds, 60)
+        if minutes < 60:
+            return f"{minutes}m left"
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}h {minutes:02d}m left"
+
+    @staticmethod
+    def orp_index(word):
+        """Return the character index used as the word's recognition point."""
+        letters = [index for index, character in enumerate(word) if character.isalpha()]
+        if not letters:
+            return 0
+        letter_count = len(letters)
+        if letter_count == 1:
+            position = 0
+        elif letter_count <= 5:
+            position = 1
+        elif letter_count <= 9:
+            position = 2
+        elif letter_count <= 13:
+            position = 3
+        else:
+            position = 4
+        return letters[min(position, letter_count - 1)]
+
+    def paused_center_tap(self):
+        """A second center tap while paused changes the reading theme."""
+        if self.pending_center_tap:
+            self.root.after_cancel(self.pending_center_tap)
+            self.pending_center_tap = None
+            self.theme_index = (self.theme_index + 1) % len(THEMES)
+            self.render_reading()
+            self.status.config(text=f"Paused  •  Theme: {THEMES[self.theme_index]['name']}")
+        else:
+            self.pending_center_tap = self.root.after(300, self.resume_from_paused)
+
+    def resume_from_paused(self):
+        self.pending_center_tap = None
+        if self.screen == "read" and not self.reader.running:
+            self.resume_reading()
+
+    def resume_reading(self):
+        self.reader.running = True
+        self.read_tick()
+
+    def pause_reading(self):
+        self.reader.running = False
+        self.stop_reading()
+        self.render_reading()
+        self.status.config(
+            text=f"Paused  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+            f"  •  {self.progress_text()}"
+        )
+
+    def read_tick(self):
+        if not self.reader.running:
+            return
+        self.render_reading()
+        self.last_scheduled_delay = self.reader.delay()
+        self.read_job = self.root.after(int(self.last_scheduled_delay * 1000), self.advance_reading)
+
+    def advance_reading(self):
+        self.read_job = None
+        if not self.reader.running:
+            return
+        # The word we're leaving behind was on screen for last_scheduled_delay
+        # seconds — that's the real, pacing-aware time to credit as "read".
+        self.pending_words_read += 1
+        self.pending_seconds_read += self.last_scheduled_delay
+        self.reader.move(1)
+        if self.settings.get("chapter_auto_pause", True) and self.reader.position in self.chapter_titles_by_position:
+            self.pause_for_chapter()
+            return
+        self.read_tick()
+
+    def pause_for_chapter(self):
+        self.reader.running = False
+        self.flush_stats()
+        title = self.chapter_titles_by_position[self.reader.position]
+        self.render_reading()
+        self.status.config(
+            text=f"Chapter: {title}  •  {self.reader.wpm} WPM ({self.remaining_time_text()})"
+        )
+
+    def flush_stats(self):
+        if self.pending_words_read == 0 and self.pending_seconds_read == 0:
+            return
+        stats = load_stats()
+        stats["total_words_read"] = stats.get("total_words_read", 0) + self.pending_words_read
+        stats["total_seconds_read"] = stats.get("total_seconds_read", 0) + self.pending_seconds_read
+        save_stats(stats)
+        self.pending_words_read = 0
+        self.pending_seconds_read = 0.0
+
+    def stop_reading(self):
+        if self.read_job:
+            self.root.after_cancel(self.read_job)
+            self.read_job = None
+        self.flush_stats()
+        if self.reader and self.book_path:
+            save_progress(
+                self.book_path.name,
+                self.reader.position,
+                self.reader.wpm,
+                THEMES[self.theme_index]["name"],
+            )
+        if self.reader:
+            self.reader.running = False
+
+    def return_to_menu(self):
+        self.cancel_sleep_timer()
+        self.save_current_flashcard_session()
+        self.show_menu()
+
+    def close(self):
+        self.cancel_sleep_timer()
+        self.stop_reading()
+        self.save_current_flashcard_session()
+        self.root.destroy()
+
+    def start_cards(self, path):
+        deck_cards, title = load_cards(path)
+        self.cards, self.card_index = load_flashcard_session(path, deck_cards)
+        self.card_deck_path = path
+        self.card_total_cards = len(deck_cards)
+        self.card_flipped = False
+        self.screen = "cards"
+        self.set_chrome_visible(title=False, status=True)
+        self.title_label.config(text=title)
+        self.render_card()
+
+    def render_card(self):
+        self.clear_content()
+        if not self.cards:
+            tk.Label(self.content, text="Deck complete!", font=("Helvetica", 22, "bold")).pack(expand=True)
+            self.status.config(text="Hold Center: menu")
+            self.apply_theme()
+            return
+        card = self.cards[self.card_index]
+        text = card["back"] if self.card_flipped else card["front"]
+        side = "Answer" if self.card_flipped else "Question"
+        side_font = ("Helvetica", 10)
+        tk.Label(self.content, text=side, font=side_font).pack(pady=(3, 0))
+        self.root.update_idletasks()
+        max_width = max(120, self.content.winfo_width() - 20)
+        heading_height = tkfont.Font(font=side_font).metrics("linespace") + 6
+        max_height = max(1, self.content.winfo_height() - heading_height - 4)
+        font, wrapped_text = self.flashcard_text_layout(text, max_width, max_height)
+        tk.Label(
+            self.content,
+            text=wrapped_text,
+            justify="center",
+            font=font,
+        ).pack(expand=True, fill="both", padx=10, pady=(0, 2))
+        self.status.config(
+            text=f"{len(self.cards)} left  •  L: keep  C: flip  R: know"
+        )
+        self.apply_theme()
+
+    def flashcard_text_layout(self, text, max_width, max_height):
+        """Pick the largest readable card font whose wrapped text fits the display."""
+        family = self.settings.get("font_family", "Courier")
+        # Start large for short cards and keep reducing until *both* the
+        # wrapped line count and every long word fit inside the card area.
+        # There is intentionally no artificial 10-point floor: a longer card
+        # must remain visible rather than being clipped off the tiny display.
+        for size in range(30, 0, -1):
+            font = tkfont.Font(family=family, size=size, weight="bold")
+            lines = self.wrap_flashcard_text(text, font, max_width)
+            if len(lines) * font.metrics("linespace") <= max_height:
+                return (family, size, "bold"), "\n".join(lines)
+        # One point is the smallest Tk font. Reaching it means the card is
+        # exceptionally long, but returning the fully wrapped text still
+        # avoids horizontal clipping.
+        font = tkfont.Font(family=family, size=1, weight="bold")
+        return (family, 1, "bold"), "\n".join(self.wrap_flashcard_text(text, font, max_width))
+
+    @staticmethod
+    def wrap_flashcard_text(text, font, max_width):
+        """Word-wrap text, splitting a lone overlong word only when needed."""
+        lines = []
+        current = ""
+        for word in text.split():
+            candidate = word if not current else f"{current} {word}"
+            if font.measure(candidate) <= max_width:
+                current = candidate
+                continue
+            if current:
+                lines.append(current)
+                current = ""
+            while font.measure(word) > max_width:
+                split_at = 1
+                while split_at < len(word) and font.measure(word[:split_at + 1]) <= max_width:
+                    split_at += 1
+                lines.append(word[:split_at])
+                word = word[split_at:]
+            current = word
+        if current or not lines:
+            lines.append(current)
+        return lines
+
+    def next_card(self, known):
+        if not self.cards:
+            return
+        record_flashcard_result()
+        if known:
+            self.cards.pop(self.card_index)
+            if self.cards:
+                self.card_index %= len(self.cards)
+        else:
+            self.card_index = (self.card_index + 1) % len(self.cards)
+        self.card_flipped = False
+        self.save_current_flashcard_session()
+        self.render_card()
+
+    def save_current_flashcard_session(self):
+        if self.card_deck_path is not None:
+            save_flashcard_session(
+                self.card_deck_path,
+                self.cards,
+                self.card_index,
+                total_cards=self.card_total_cards,
+            )
+
+    def apply_theme(self):
+        theme = THEMES[self.theme_index]
+        self.root.configure(bg=theme["bg"])
+        self.content.configure(bg=theme["bg"])
+        for widget in (self.title_label, self.status):
+            widget.configure(bg=theme["bg"], fg=theme["fg"])
+        for child in self.content.winfo_children():
+            self._theme_children(child, theme)
+        for button in self.buttons.values():
+            button.configure(bg=theme["bg"], fg=theme["fg"], activebackground=theme["accent"])
+
+    def _theme_children(self, widget, theme):
+        try:
+            widget.configure(bg=theme["bg"])
+        except tk.TclError:
+            pass
+        try:
+            widget.configure(fg=theme["fg"])
+        except tk.TclError:
+            pass
+        for child in widget.winfo_children():
+            self._theme_children(child, theme)
+
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    TempoApp(root)
+    root.mainloop()
